@@ -168,7 +168,7 @@ class QuestEngine:
         else:
             await self.storage.set_progress(chat_id, step.id, progress.action_index + 1)
         await self._execute(chat_id)
-        return True, ""
+        return True, selected.callback_text
 
     async def play_memory(self, chat_id: int, action: MemoryAction) -> None:
         header = (
