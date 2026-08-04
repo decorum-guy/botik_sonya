@@ -15,7 +15,10 @@ class Settings(BaseSettings):
     )
 
     bot_token: str = Field(alias="BOT_TOKEN")
-    admin_telegram_id: int = Field(alias="ADMIN_TELEGRAM_ID")
+    # Legacy field from the first admin implementation. It is no longer used,
+    # but remains accepted so an old `.env` with ADMIN_TELEGRAM_ID= does not
+    # break startup after switching to ADMIN_PASSWORD authentication.
+    admin_telegram_id: int | None = Field(default=None, alias="ADMIN_TELEGRAM_ID")
     sonya_telegram_id: int | None = Field(default=None, alias="SONYA_TELEGRAM_ID")
     proxy_url: str | None = Field(default=None, alias="PROXY_URL")
     quest_start_delay_seconds: int = Field(default=300, alias="QUEST_START_DELAY_SECONDS")
@@ -30,10 +33,12 @@ class Settings(BaseSettings):
             return None
         return value
 
-    @field_validator("sonya_telegram_id", mode="before")
+    @field_validator("admin_telegram_id", "sonya_telegram_id", mode="before")
     @classmethod
     def blank_id_to_none(cls, value: object) -> object:
-        if value in (None, ""):
+        if value is None:
+            return None
+        if isinstance(value, str) and not value.strip():
             return None
         return value
 
