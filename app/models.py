@@ -120,6 +120,7 @@ class ButtonSpec(StrictModel):
     style: ButtonStyleAlias = ButtonStyleAlias.DEFAULT
     next_step: str | None = None
     answer_text: str = ""
+    callback_text: str = Field(default="Принято", min_length=1, max_length=200)
 
 
 class ButtonsAction(BaseAction):
