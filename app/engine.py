@@ -275,10 +275,11 @@ class QuestEngine:
             {"text": action.text, "pause_after_seconds": 0}
         ]
         accumulated = ""
+        last_draft_text = ""
         seconds_since_flush = 0.0
         sent_any_draft = False
 
-        for segment_index, segment in enumerate(segments):
+        for segment in segments:
             if isinstance(segment, dict):
                 segment_text = str(segment.get("text", ""))
                 pause_after = float(segment.get("pause_after_seconds", 0))
@@ -297,15 +298,18 @@ class QuestEngine:
                 if not await self._send_draft_update(chat_id, draft_id, accumulated):
                     return
                 sent_any_draft = True
+                last_draft_text = accumulated
                 seconds_since_flush = 0.0
 
             # A segment pause is meaningful only if the user can see the complete
             # segment before the pause starts, so flush at that boundary.
-            if pause_after and accumulated:
+            if pause_after and accumulated and accumulated != last_draft_text:
                 if not await self._send_draft_update(chat_id, draft_id, accumulated):
                     return
                 sent_any_draft = True
+                last_draft_text = accumulated
                 seconds_since_flush = 0.0
+            if pause_after:
                 await asyncio.sleep(pause_after)
 
         # Do not send a last draft update immediately before sendMessage. The
