@@ -8,3 +8,9 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+ignore = [
+  "E501",  # Existing long Telegram/UI strings are intentionally readable inline.
+  "I001",  # Keep current import grouping; CI still checks unresolved imports.
+  "UP035", # Compatibility style only; not a runtime correctness issue.
+  "UP037", # Quoted annotations remain valid with future annotations enabled.
+]
