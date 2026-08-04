@@ -1,0 +1,104 @@
+{
+  "meta": {
+    "version": 1,
+    "title": "Квест для Сони — тест",
+    "entry_step_id": "intro",
+    "intro_step_id": "intro"
+  },
+  "steps": [
+    {
+      "id": "intro",
+      "title": "Неожиданное интро",
+      "notes": "Этот этап запускается таймером после команды администратора.",
+      "actions": [
+        {
+          "type": "send_text",
+          "text": "<b>Соединение восстановлено.</b>\n\nКажется, у меня осталось для тебя одно незавершённое дело.",
+          "parse_mode": "HTML",
+          "disable_notification": false
+        },
+        {
+          "type": "delay",
+          "seconds": 1.2
+        },
+        {
+          "type": "ask_input",
+          "prompt": "Для теста введи число <b>23</b>.",
+          "parse_mode": "HTML",
+          "validator": {
+            "type": "integer_equal",
+            "values": [],
+            "pattern": "",
+            "number": 23,
+            "minimum": null,
+            "maximum": null,
+            "date": "",
+            "case_sensitive": false,
+            "trim": true,
+            "replace_yo": true,
+            "remove_punctuation": true
+          },
+          "wrong_answers": [
+            "Не совпало. Попробуй ещё раз.",
+            "Подсказка: это число уже написано в предыдущем сообщении."
+          ],
+          "success_text": "Совпадение найдено.",
+          "next_step": "memory-1"
+        }
+      ]
+    },
+    {
+      "id": "memory-1",
+      "title": "Тест пересылки",
+      "notes": "Сначала запиши /memory_new first_chat.",
+      "actions": [
+        {
+          "type": "memory_reconstruction",
+          "memory_id": "first_chat",
+          "number": 1,
+          "total": 1,
+          "date_text": "Тестовая дата",
+          "title": "ВОССТАНОВЛЕНИЕ ВОСПОМИНАНИЯ",
+          "intro": "Найден сохранившийся фрагмент переписки.",
+          "outro": "Тест реконструкции завершён.",
+          "message_delay_seconds": 0.65
+        },
+        {
+          "type": "buttons",
+          "text": "Как отобразились пересылки?",
+          "parse_mode": "HTML",
+          "columns": 1,
+          "buttons": [
+            {
+              "text": "Всё выглядит правильно",
+              "id": "forward_ok",
+              "style": "success",
+              "next_step": "finish",
+              "answer_text": "Отлично. Значит, основная механика работает."
+            },
+            {
+              "text": "Есть проблема",
+              "id": "forward_problem",
+              "style": "danger",
+              "next_step": "finish",
+              "answer_text": "Зафиксируй скриншот — по нему поправим способ воспроизведения."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "finish",
+      "title": "Конец теста",
+      "notes": "Технический финал первой версии.",
+      "actions": [
+        {
+          "type": "send_text",
+          "text": "Тестовая версия ROADMAP завершена.",
+          "parse_mode": "HTML",
+          "disable_notification": false
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Botik Sonya · Roadmap Studio</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <span class="logo">B</span>
+      <strong>Roadmap Studio</strong>
+      <span class="muted">локальный конструктор квеста</span>
+    </div>
+    <div class="topbar__actions">
+      <button id="new-project" class="button ghost">Новый</button>
+      <label class="button ghost" for="import-file">Импорт JSON</label>
+      <input id="import-file" type="file" accept="application/json,.json" hidden>
+      <button id="save-draft" class="button ghost">Сохранить черновик</button>
+      <button id="validate" class="button primary">Проверить</button>
+      <button id="export" class="button success">Экспорт quest.json</button>
+    </div>
+  </header>
+
+  <main class="workspace">
+    <aside class="palette panel">
+      <div class="panel__head">
+        <h2>Блоки</h2>
+        <p>Выбери этап и добавляй действия.</p>
+      </div>
+      <div id="palette-list" class="palette-list"></div>
+      <button id="add-step" class="button wide primary">＋ Новый этап</button>
+      <div class="legend">
+        <h3>Стили кнопок</h3>
+        <span class="chip default">default</span>
+        <span class="chip primary">primary</span>
+        <span class="chip success">success</span>
+        <span class="chip danger">danger</span>
+      </div>
+    </aside>
+
+    <section class="canvas panel">
+      <div class="canvas__head">
+        <div>
+          <h1 id="project-title">Квест</h1>
+          <p>Этапы выполняются сверху вниз, переходы задаются в действиях.</p>
+        </div>
+        <button id="edit-meta" class="button ghost">Настройки проекта</button>
+      </div>
+      <div id="status" class="status" hidden></div>
+      <div id="steps" class="steps"></div>
+      <div id="empty-state" class="empty-state" hidden>
+        Создай первый этап или импортируй готовый ROADMAP.
+      </div>
+    </section>
+
+    <aside class="inspector panel">
+      <div class="panel__head">
+        <h2>Инспектор</h2>
+        <p>Параметры выбранного блока.</p>
+      </div>
+      <form id="inspector-form" autocomplete="off"></form>
+    </aside>
+  </main>
+
+  <template id="field-template">
+    <label class="field">
+      <span></span>
+      <input>
+      <small></small>
+    </label>
+  </template>
+
+  <script src="app.js"></script>
+</body>
+</html>
