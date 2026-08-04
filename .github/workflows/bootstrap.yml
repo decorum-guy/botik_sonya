@@ -1,0 +1,28 @@
+name: Bootstrap project
+
+on:
+  push:
+    paths:
+      - bootstrap_payload.b64
+
+permissions:
+  contents: write
+
+jobs:
+  unpack:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unpack project payload
+        run: |
+          base64 -d bootstrap_payload.b64 > /tmp/project.tar.gz
+          tar -xzf /tmp/project.tar.gz
+          touch .bootstrap_done
+      - name: Commit generated project
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Build initial bot and roadmap studio" || exit 0
+          git push
