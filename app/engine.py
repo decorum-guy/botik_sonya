@@ -5,11 +5,16 @@ import html
 import logging
 import re
 import secrets
+import time
 from pathlib import Path
 
 from aiogram import Bot
 from aiogram.enums import ParseMode
-from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
+from aiogram.exceptions import (
+    TelegramBadRequest,
+    TelegramForbiddenError,
+    TelegramRetryAfter,
+)
 from aiogram.types import FSInputFile, InlineKeyboardMarkup, Message
 
 from app.button_styles import callback_button
@@ -27,6 +32,12 @@ from app.storage import Storage
 from app.validation import validate_answer
 
 logger = logging.getLogger(__name__)
+
+# Telegram does not document a dedicated sendMessageDraft rate. Keep draft updates
+# deliberately conservative and batch characters/words between API calls.
+DRAFT_FLUSH_INTERVAL_SECONDS = 0.75
+DRAFT_MIN_REQUEST_INTERVAL_SECONDS = 0.85
+DRAFT_RETRY_ATTEMPTS = 5
 
 
 def parse_mode(value: str):
@@ -58,6 +69,7 @@ class QuestEngine:
         self.storage = storage
         self.roadmap = roadmap
         self.root = root.resolve()
+        self._draft_last_request_at: dict[int, float] = {}
 
     async def start(self, chat_id: int, step_id: str | None = None) -> None:
         target = step_id or self.roadmap.meta.entry_step_id
@@ -234,12 +246,28 @@ class QuestEngine:
     async def _send_text(self, chat_id: int, action: SendTextAction) -> None:
         if action.delivery_mode != "instant":
             await self._stream_text(chat_id, action)
-        await self.bot.send_message(
-            chat_id,
-            action.text,
-            parse_mode=parse_mode(action.parse_mode),
-            disable_notification=action.disable_notification,
-        )
+        await self._send_final_text(chat_id, action)
+
+    async def _send_final_text(self, chat_id: int, action: SendTextAction) -> None:
+        for attempt in range(1, DRAFT_RETRY_ATTEMPTS + 1):
+            try:
+                await self.bot.send_message(
+                    chat_id,
+                    action.text,
+                    parse_mode=parse_mode(action.parse_mode),
+                    disable_notification=action.disable_notification,
+                )
+                return
+            except TelegramRetryAfter as exc:
+                if attempt == DRAFT_RETRY_ATTEMPTS:
+                    raise
+                delay = max(float(exc.retry_after), 0) + 0.25
+                logger.warning(
+                    "Telegram throttled final streamed message in chat %s; retrying in %.2fs",
+                    chat_id,
+                    delay,
+                )
+                await asyncio.sleep(delay)
 
     async def _stream_text(self, chat_id: int, action: SendTextAction) -> None:
         draft_id = secrets.randbelow(2_147_483_647) + 1
@@ -247,31 +275,81 @@ class QuestEngine:
             {"text": action.text, "pause_after_seconds": 0}
         ]
         accumulated = ""
+        seconds_since_flush = 0.0
+        sent_any_draft = False
 
-        try:
-            for segment in segments:
-                if isinstance(segment, dict):
-                    segment_text = str(segment.get("text", ""))
-                    pause_after = float(segment.get("pause_after_seconds", 0))
-                else:
-                    segment_text = segment.text
-                    pause_after = segment.pause_after_seconds
+        for segment_index, segment in enumerate(segments):
+            if isinstance(segment, dict):
+                segment_text = str(segment.get("text", ""))
+                pause_after = float(segment.get("pause_after_seconds", 0))
+            else:
+                segment_text = segment.text
+                pause_after = segment.pause_after_seconds
 
-                visible = plain_draft_text(segment_text, action.parse_mode)
-                for piece in stream_pieces(visible, action.delivery_mode):
-                    accumulated += piece
-                    if not accumulated:
-                        continue
-                    await self.bot.send_message_draft(
-                        chat_id=chat_id,
-                        draft_id=draft_id,
-                        text=accumulated,
-                    )
-                    await asyncio.sleep(action.typing_speed_seconds)
-                if pause_after:
-                    await asyncio.sleep(pause_after)
-        except (AttributeError, TelegramBadRequest) as exc:
-            logger.warning("Streaming draft unavailable, using final message only: %s", exc)
+            visible = plain_draft_text(segment_text, action.parse_mode)
+            for piece in stream_pieces(visible, action.delivery_mode):
+                accumulated += piece
+                await asyncio.sleep(action.typing_speed_seconds)
+                seconds_since_flush += action.typing_speed_seconds
+
+                if seconds_since_flush < DRAFT_FLUSH_INTERVAL_SECONDS:
+                    continue
+                if not await self._send_draft_update(chat_id, draft_id, accumulated):
+                    return
+                sent_any_draft = True
+                seconds_since_flush = 0.0
+
+            # A segment pause is meaningful only if the user can see the complete
+            # segment before the pause starts, so flush at that boundary.
+            if pause_after and accumulated:
+                if not await self._send_draft_update(chat_id, draft_id, accumulated):
+                    return
+                sent_any_draft = True
+                seconds_since_flush = 0.0
+                await asyncio.sleep(pause_after)
+
+        # Do not send a last draft update immediately before sendMessage. The
+        # permanent final message follows next and avoids one extra flood-prone call.
+        if not sent_any_draft:
+            logger.debug(
+                "Streamed text in chat %s was shorter than the safe draft batch interval",
+                chat_id,
+            )
+
+    async def _send_draft_update(self, chat_id: int, draft_id: int, text: str) -> bool:
+        for attempt in range(1, DRAFT_RETRY_ATTEMPTS + 1):
+            last_request = self._draft_last_request_at.get(chat_id, 0.0)
+            remaining = DRAFT_MIN_REQUEST_INTERVAL_SECONDS - (time.monotonic() - last_request)
+            if remaining > 0:
+                await asyncio.sleep(remaining)
+
+            self._draft_last_request_at[chat_id] = time.monotonic()
+            try:
+                await self.bot.send_message_draft(
+                    chat_id=chat_id,
+                    draft_id=draft_id,
+                    text=text,
+                )
+                return True
+            except TelegramRetryAfter as exc:
+                delay = max(float(exc.retry_after), 0) + 0.25
+                logger.warning(
+                    "Telegram throttled sendMessageDraft in chat %s; retry %s/%s in %.2fs",
+                    chat_id,
+                    attempt,
+                    DRAFT_RETRY_ATTEMPTS,
+                    delay,
+                )
+                await asyncio.sleep(delay)
+            except (AttributeError, TelegramBadRequest) as exc:
+                logger.warning("Streaming draft unavailable, using final message only: %s", exc)
+                return False
+
+        logger.warning(
+            "Streaming draft stopped after %s flood-control retries; final message will still be sent",
+            DRAFT_RETRY_ATTEMPTS,
+        )
+        return False
 
     def _keyboard(self, action: ButtonsAction) -> InlineKeyboardMarkup:
         rows = []
