@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import TYPE_CHECKING
 
-from aiogram.enums import ButtonStyle
-from aiogram.types import InlineKeyboardButton
+if TYPE_CHECKING:
+    from aiogram.types import InlineKeyboardButton
 
 
 class ButtonStyleAlias(StrEnum):
@@ -13,14 +14,6 @@ class ButtonStyleAlias(StrEnum):
     PRIMARY = "primary"
     SUCCESS = "success"
     DANGER = "danger"
-
-
-_STYLE_MAP: dict[ButtonStyleAlias, ButtonStyle | None] = {
-    ButtonStyleAlias.DEFAULT: None,
-    ButtonStyleAlias.PRIMARY: ButtonStyle.PRIMARY,
-    ButtonStyleAlias.SUCCESS: ButtonStyle.SUCCESS,
-    ButtonStyleAlias.DANGER: ButtonStyle.DANGER,
-}
 
 
 def normalize_style(value: str | ButtonStyleAlias | None) -> ButtonStyleAlias:
@@ -39,9 +32,19 @@ def callback_button(
     callback_data: str,
     style: str | ButtonStyleAlias | None = ButtonStyleAlias.DEFAULT,
 ) -> InlineKeyboardButton:
+    """Build a Telegram button while keeping schema-only imports lightweight."""
+    from aiogram.enums import ButtonStyle
+    from aiogram.types import InlineKeyboardButton
+
     alias = normalize_style(style)
+    style_map = {
+        ButtonStyleAlias.DEFAULT: None,
+        ButtonStyleAlias.PRIMARY: ButtonStyle.PRIMARY,
+        ButtonStyleAlias.SUCCESS: ButtonStyle.SUCCESS,
+        ButtonStyleAlias.DANGER: ButtonStyle.DANGER,
+    }
     return InlineKeyboardButton(
         text=text,
         callback_data=callback_data,
-        style=_STYLE_MAP[alias],
+        style=style_map[alias],
     )
