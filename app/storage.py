@@ -17,6 +17,25 @@ class Progress:
     wrong_index: int
 
 
+@dataclass(frozen=True, slots=True)
+class BotUser:
+    user_id: int
+    chat_id: int
+    username: str | None
+    first_name: str | None
+    last_name: str | None
+    last_seen_at: str
+
+    @property
+    def display_name(self) -> str:
+        full_name = " ".join(part for part in (self.first_name, self.last_name) if part).strip()
+        if full_name:
+            return full_name
+        if self.username:
+            return f"@{self.username}"
+        return str(self.user_id)
+
+
 class Storage:
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -62,9 +81,88 @@ class Storage:
                     mode TEXT,
                     payload TEXT
                 );
+                CREATE TABLE IF NOT EXISTS bot_users (
+                    user_id INTEGER PRIMARY KEY,
+                    chat_id INTEGER NOT NULL,
+                    username TEXT,
+                    first_name TEXT,
+                    last_name TEXT,
+                    last_seen_at TEXT NOT NULL
+                );
                 """
             )
             await db.commit()
+
+    async def remember_user(
+        self,
+        *,
+        user_id: int,
+        chat_id: int,
+        username: str | None,
+        first_name: str | None,
+        last_name: str | None,
+    ) -> None:
+        now = datetime.now(UTC).isoformat()
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute(
+                """
+                INSERT INTO bot_users(user_id, chat_id, username, first_name, last_name, last_seen_at)
+                VALUES(?, ?, ?, ?, ?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    chat_id = excluded.chat_id,
+                    username = excluded.username,
+                    first_name = excluded.first_name,
+                    last_name = excluded.last_name,
+                    last_seen_at = excluded.last_seen_at
+                """,
+                (user_id, chat_id, username, first_name, last_name, now),
+            )
+            await db.commit()
+
+    async def list_users(self) -> list[BotUser]:
+        async with aiosqlite.connect(self.path) as db:
+            rows = await (
+                await db.execute(
+                    """
+                    SELECT user_id, chat_id, username, first_name, last_name, last_seen_at
+                    FROM bot_users
+                    ORDER BY last_seen_at DESC
+                    """
+                )
+            ).fetchall()
+        return [
+            BotUser(
+                user_id=int(row[0]),
+                chat_id=int(row[1]),
+                username=row[2],
+                first_name=row[3],
+                last_name=row[4],
+                last_seen_at=str(row[5]),
+            )
+            for row in rows
+        ]
+
+    async def known_user_by_chat_id(self, chat_id: int) -> BotUser | None:
+        async with aiosqlite.connect(self.path) as db:
+            row = await (
+                await db.execute(
+                    """
+                    SELECT user_id, chat_id, username, first_name, last_name, last_seen_at
+                    FROM bot_users WHERE chat_id = ?
+                    """,
+                    (chat_id,),
+                )
+            ).fetchone()
+        if row is None:
+            return None
+        return BotUser(
+            user_id=int(row[0]),
+            chat_id=int(row[1]),
+            username=row[2],
+            first_name=row[3],
+            last_name=row[4],
+            last_seen_at=str(row[5]),
+        )
 
     async def get_setting(self, key: str) -> str | None:
         async with aiosqlite.connect(self.path) as db:
@@ -176,7 +274,13 @@ class Storage:
             await db.execute("DELETE FROM progress WHERE chat_id = ?", (chat_id,))
             await db.commit()
 
-    async def start_memory_recording(self, admin_id: int, memory_id: str) -> None:
+    async def start_memory_recording(
+        self,
+        admin_id: int,
+        memory_id: str,
+        *,
+        mode: str = "memory_record",
+    ) -> None:
         async with aiosqlite.connect(self.path) as db:
             await db.execute(
                 "INSERT OR IGNORE INTO memories(memory_id, created_at) VALUES(?, ?)",
@@ -184,9 +288,9 @@ class Storage:
             )
             await db.execute("DELETE FROM memory_messages WHERE memory_id = ?", (memory_id,))
             await db.execute(
-                "INSERT INTO admin_session(admin_id, mode, payload) VALUES(?, 'memory_record', ?) "
+                "INSERT INTO admin_session(admin_id, mode, payload) VALUES(?, ?, ?) "
                 "ON CONFLICT(admin_id) DO UPDATE SET mode = excluded.mode, payload = excluded.payload",
-                (admin_id, memory_id),
+                (admin_id, mode, memory_id),
             )
             await db.commit()
 
@@ -237,6 +341,16 @@ class Storage:
                 (memory_id,),
             )).fetchall()
             return [(int(r[0]), int(r[1]), int(r[2]), str(r[3]), r[4]) for r in rows]
+
+    async def memory_message_count(self, memory_id: str) -> int:
+        async with aiosqlite.connect(self.path) as db:
+            row = await (
+                await db.execute(
+                    "SELECT COUNT(*) FROM memory_messages WHERE memory_id = ?",
+                    (memory_id,),
+                )
+            ).fetchone()
+        return int(row[0]) if row else 0
 
     async def list_memories(self) -> list[tuple[str, int]]:
         async with aiosqlite.connect(self.path) as db:
