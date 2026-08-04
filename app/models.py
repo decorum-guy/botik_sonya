@@ -8,6 +8,7 @@ from app.button_styles import ButtonStyleAlias
 
 
 ParseModeName = Literal["HTML", "MarkdownV2", "none"]
+TextDeliveryMode = Literal["instant", "characters", "words"]
 
 
 class StrictModel(BaseModel):
@@ -25,11 +26,19 @@ class BaseAction(StrictModel):
     type: str
 
 
+class StreamSegment(StrictModel):
+    text: str
+    pause_after_seconds: float = Field(default=0, ge=0, le=60)
+
+
 class SendTextAction(BaseAction):
     type: Literal["send_text"]
     text: str
     parse_mode: ParseModeName = "HTML"
     disable_notification: bool = False
+    delivery_mode: TextDeliveryMode = "instant"
+    typing_speed_seconds: float = Field(default=0.12, ge=0.03, le=5)
+    stream_segments: list[StreamSegment] = Field(default_factory=list)
 
 
 class MediaAction(BaseAction):
