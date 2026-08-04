@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import html
 import logging
+import re
+import secrets
 from pathlib import Path
 
 from aiogram import Bot
@@ -35,6 +37,21 @@ def parse_mode(value: str):
     return ParseMode.HTML
 
 
+def plain_draft_text(value: str, mode: str) -> str:
+    if mode == "HTML":
+        return html.unescape(re.sub(r"<[^>]+>", "", value))
+    if mode == "MarkdownV2":
+        unescaped = re.sub(r"\\([_*\[\]()~`>#+\-=|{}.!])", r"\1", value)
+        return re.sub(r"[*_~`]", "", unescaped)
+    return value
+
+
+def stream_pieces(value: str, mode: str) -> list[str]:
+    if mode == "words":
+        return re.findall(r"\S+\s*|\s+", value)
+    return list(value)
+
+
 class QuestEngine:
     def __init__(self, bot: Bot, storage: Storage, roadmap: Roadmap, root: Path) -> None:
         self.bot = bot
@@ -61,12 +78,7 @@ class QuestEngine:
             next_index = progress.action_index + 1
 
             if isinstance(action, SendTextAction):
-                await self.bot.send_message(
-                    chat_id,
-                    action.text,
-                    parse_mode=parse_mode(action.parse_mode),
-                    disable_notification=action.disable_notification,
-                )
+                await self._send_text(chat_id, action)
                 await self.storage.set_progress(chat_id, step.id, next_index)
                 continue
 
@@ -87,7 +99,11 @@ class QuestEngine:
 
             if isinstance(action, AskInputAction):
                 if action.prompt:
-                    await self.bot.send_message(chat_id, action.prompt, parse_mode=parse_mode(action.parse_mode))
+                    await self.bot.send_message(
+                        chat_id,
+                        action.prompt,
+                        parse_mode=parse_mode(action.parse_mode),
+                    )
                 await self.storage.set_progress(
                     chat_id,
                     step.id,
@@ -181,7 +197,10 @@ class QuestEngine:
             await self.bot.send_message(chat_id, action.intro)
         messages = await self.storage.memory_messages(action.memory_id)
         if not messages:
-            await self.bot.send_message(chat_id, f"[Тест] Воспоминание {html.escape(action.memory_id)} пока пустое.")
+            await self.bot.send_message(
+                chat_id,
+                f"[Тест] Воспоминание {html.escape(action.memory_id)} пока пустое.",
+            )
             return
         for _, source_chat_id, source_message_id, _, _ in messages:
             try:
@@ -212,11 +231,57 @@ class QuestEngine:
             await asyncio.sleep(0.25)
         return len(messages)
 
+    async def _send_text(self, chat_id: int, action: SendTextAction) -> None:
+        if action.delivery_mode != "instant":
+            await self._stream_text(chat_id, action)
+        await self.bot.send_message(
+            chat_id,
+            action.text,
+            parse_mode=parse_mode(action.parse_mode),
+            disable_notification=action.disable_notification,
+        )
+
+    async def _stream_text(self, chat_id: int, action: SendTextAction) -> None:
+        draft_id = secrets.randbelow(2_147_483_647) + 1
+        segments = action.stream_segments or [
+            {"text": action.text, "pause_after_seconds": 0}
+        ]
+        accumulated = ""
+
+        try:
+            for segment in segments:
+                if isinstance(segment, dict):
+                    segment_text = str(segment.get("text", ""))
+                    pause_after = float(segment.get("pause_after_seconds", 0))
+                else:
+                    segment_text = segment.text
+                    pause_after = segment.pause_after_seconds
+
+                visible = plain_draft_text(segment_text, action.parse_mode)
+                for piece in stream_pieces(visible, action.delivery_mode):
+                    accumulated += piece
+                    if not accumulated:
+                        continue
+                    await self.bot.send_message_draft(
+                        chat_id=chat_id,
+                        draft_id=draft_id,
+                        text=accumulated,
+                    )
+                    await asyncio.sleep(action.typing_speed_seconds)
+                if pause_after:
+                    await asyncio.sleep(pause_after)
+        except (AttributeError, TelegramBadRequest) as exc:
+            logger.warning("Streaming draft unavailable, using final message only: %s", exc)
+
     def _keyboard(self, action: ButtonsAction) -> InlineKeyboardMarkup:
         rows = []
         for index in range(0, len(action.buttons), action.columns):
             rows.append([
-                callback_button(text=button.text, callback_data=f"quest:{button.id}", style=button.style)
+                callback_button(
+                    text=button.text,
+                    callback_data=f"quest:{button.id}",
+                    style=button.style,
+                )
                 for button in action.buttons[index:index + action.columns]
             ])
         return InlineKeyboardMarkup(inline_keyboard=rows)
