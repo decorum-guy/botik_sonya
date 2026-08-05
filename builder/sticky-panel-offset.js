@@ -12,11 +12,10 @@
     const runner = document.querySelector("#test-runner");
     const topbarHeight = Math.ceil(topbar?.getBoundingClientRect().height || 64);
     const runnerHeight = Math.ceil(runner?.getBoundingClientRect().height || 0);
+    const sideTop = topbarHeight + runnerHeight + 14;
+
     document.documentElement.style.setProperty("--topbar-height", `${topbarHeight}px`);
-    document.documentElement.style.setProperty(
-      "--builder-sticky-top",
-      `${topbarHeight + runnerHeight + 14}px`
-    );
+    document.documentElement.style.setProperty("--builder-side-top", `${sideTop}px`);
   }
 
   function schedule() {
