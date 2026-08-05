@@ -13,7 +13,7 @@ def test_find_videos_recursively_and_ignore_other_files(tmp_path: Path) -> None:
 
     found = prepare_media.find_videos(media)
 
-    assert found == [media / "one.mp4", nested / "two.MOV"]
+    assert found == sorted([media / "one.mp4", nested / "two.MOV"])
 
 
 def test_prepare_only_oversized_videos(tmp_path: Path, monkeypatch) -> None:
