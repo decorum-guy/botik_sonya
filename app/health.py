@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 import logging
+import sys
 import time
 from typing import Any
 
@@ -20,6 +21,36 @@ def _state_module() -> Any:
     import app.main as bot_app
 
     return bot_app
+
+
+def _is_ping_message(message: Message) -> bool:
+    command = (message.text or "").strip().split(maxsplit=1)[0]
+    command = command.split("@", 1)[0].lower()
+    return command == "/ping"
+
+
+def _protect_ping_from_builder_filters() -> None:
+    """Keep Roadmap Studio input filters from consuming /ping as quest content."""
+
+    for module in tuple(sys.modules.values()):
+        spec_name = getattr(getattr(module, "__spec__", None), "name", None)
+        module_name = getattr(module, "__name__", None)
+        if spec_name != "tools.builder_server" and module_name != "tools.builder_server":
+            continue
+
+        for class_name in ("ActiveTestInputFilter", "EditorMemoryMessageFilter"):
+            filter_class = getattr(module, class_name, None)
+            if filter_class is None or getattr(filter_class, "_ping_guard_installed", False):
+                continue
+            original_call = filter_class.__call__
+
+            async def guarded_call(self, message, _original_call=original_call):
+                if _is_ping_message(message):
+                    return False
+                return await _original_call(self, message)
+
+            filter_class.__call__ = guarded_call
+            filter_class._ping_guard_installed = True
 
 
 async def admin_ping(message: Message) -> None:
@@ -113,6 +144,8 @@ async def admin_ping(message: Message) -> None:
 def install_admin_ping(router: Router) -> None:
     if getattr(router, "_admin_ping_installed", False):
         return
+
+    _protect_ping_from_builder_filters()
 
     # app.main has a final catch-all message handler. Register normally and then
     # move /ping to the front so the generic handler cannot swallow the command.
