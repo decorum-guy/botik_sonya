@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import html
 import logging
+import random
 import re
 import secrets
 import time
@@ -18,6 +19,7 @@ from aiogram.exceptions import (
 from aiogram.types import FSInputFile, InlineKeyboardMarkup, Message
 
 from app.button_styles import callback_button
+from app.media_retry import retry_transient_telegram
 from app.models import (
     AskInputAction,
     ButtonsAction,
@@ -38,6 +40,12 @@ logger = logging.getLogger(__name__)
 DRAFT_FLUSH_INTERVAL_SECONDS = 0.75
 DRAFT_MIN_REQUEST_INTERVAL_SECONDS = 0.85
 DRAFT_RETRY_ATTEMPTS = 5
+
+# Human-looking pacing for reconstructed conversations. The legacy
+# message_delay_seconds field remains accepted in ROADMAP files for backwards
+# compatibility, but playback now always uses a fresh random value in this range.
+MEMORY_MESSAGE_DELAY_MIN_SECONDS = 1.0
+MEMORY_MESSAGE_DELAY_MAX_SECONDS = 3.5
 
 
 def parse_mode(value: str):
@@ -61,6 +69,13 @@ def stream_pieces(value: str, mode: str) -> list[str]:
     if mode == "words":
         return re.findall(r"\S+\s*|\s+", value)
     return list(value)
+
+
+def memory_message_delay_seconds() -> float:
+    return random.uniform(
+        MEMORY_MESSAGE_DELAY_MIN_SECONDS,
+        MEMORY_MESSAGE_DELAY_MAX_SECONDS,
+    )
 
 
 class QuestEngine:
@@ -198,49 +213,106 @@ class QuestEngine:
         await self._execute(chat_id)
         return True, selected.callback_text
 
+    async def _send_memory_text(self, chat_id: int, text: str) -> None:
+        await retry_transient_telegram(
+            lambda: self.bot.send_message(chat_id, text),
+            chat_id=chat_id,
+            label="memory text",
+        )
+
+    async def _deliver_memory_message(
+        self,
+        chat_id: int,
+        source_chat_id: int,
+        source_message_id: int,
+    ) -> None:
+        try:
+            await retry_transient_telegram(
+                lambda: self.bot.forward_message(
+                    chat_id=chat_id,
+                    from_chat_id=source_chat_id,
+                    message_id=source_message_id,
+                ),
+                chat_id=chat_id,
+                label=f"memory forward #{source_message_id}",
+            )
+            return
+        except (TelegramBadRequest, TelegramForbiddenError) as forward_exc:
+            logger.warning(
+                "Cannot forward memory message %s; trying copyMessage fallback: %s",
+                source_message_id,
+                forward_exc,
+            )
+
+        # copyMessage supports stickers, video notes and text with custom emoji,
+        # but intentionally omits the Forwarded from header. It is a safer
+        # fallback than a screenshot because animation and native Telegram media
+        # remain intact.
+        try:
+            await retry_transient_telegram(
+                lambda: self.bot.copy_message(
+                    chat_id=chat_id,
+                    from_chat_id=source_chat_id,
+                    message_id=source_message_id,
+                ),
+                chat_id=chat_id,
+                label=f"memory copy fallback #{source_message_id}",
+            )
+        except (TelegramBadRequest, TelegramForbiddenError) as copy_exc:
+            logger.exception(
+                "Cannot forward or copy memory message %s: %s",
+                source_message_id,
+                copy_exc,
+            )
+            await self._send_memory_text(
+                chat_id,
+                f"⚠️ Не удалось восстановить сохранённый фрагмент #{source_message_id}.",
+            )
+        else:
+            logger.info(
+                "Memory message %s delivered via copyMessage fallback",
+                source_message_id,
+            )
+
     async def play_memory(self, chat_id: int, action: MemoryAction) -> None:
         header = (
             f"<b>{html.escape(action.title)} {action.number}/{action.total}</b>\n\n"
             f"{html.escape(action.date_text)}\n"
             "━━━━━━━━━━━━━━━━━━━━"
         )
-        await self.bot.send_message(chat_id, header)
+        await self._send_memory_text(chat_id, header)
         if action.intro:
-            await self.bot.send_message(chat_id, action.intro)
+            await self._send_memory_text(chat_id, action.intro)
         messages = await self.storage.memory_messages(action.memory_id)
         if not messages:
-            await self.bot.send_message(
+            await self._send_memory_text(
                 chat_id,
                 f"[Тест] Воспоминание {html.escape(action.memory_id)} пока пустое.",
             )
             return
-        for _, source_chat_id, source_message_id, _, _ in messages:
-            try:
-                await self.bot.forward_message(
-                    chat_id=chat_id,
-                    from_chat_id=source_chat_id,
-                    message_id=source_message_id,
-                )
-            except (TelegramBadRequest, TelegramForbiddenError) as exc:
-                logger.exception("Cannot forward memory message %s: %s", source_message_id, exc)
-                await self.bot.send_message(
-                    chat_id,
-                    f"⚠️ Не удалось переслать сохранённый фрагмент #{source_message_id}.",
-                )
-            if action.message_delay_seconds:
-                await asyncio.sleep(action.message_delay_seconds)
+
+        for index, (_, source_chat_id, source_message_id, _, _) in enumerate(messages):
+            await self._deliver_memory_message(
+                chat_id,
+                source_chat_id,
+                source_message_id,
+            )
+            if index < len(messages) - 1:
+                await asyncio.sleep(memory_message_delay_seconds())
+
         if action.outro:
-            await self.bot.send_message(chat_id, action.outro)
+            await self._send_memory_text(chat_id, action.outro)
 
     async def preview_memory(self, destination_chat_id: int, memory_id: str) -> int:
         messages = await self.storage.memory_messages(memory_id)
-        for _, source_chat_id, source_message_id, _, _ in messages:
-            await self.bot.forward_message(
-                chat_id=destination_chat_id,
-                from_chat_id=source_chat_id,
-                message_id=source_message_id,
+        for index, (_, source_chat_id, source_message_id, _, _) in enumerate(messages):
+            await self._deliver_memory_message(
+                destination_chat_id,
+                source_chat_id,
+                source_message_id,
             )
-            await asyncio.sleep(0.25)
+            if index < len(messages) - 1:
+                await asyncio.sleep(memory_message_delay_seconds())
         return len(messages)
 
     async def _send_text(self, chat_id: int, action: SendTextAction) -> None:
