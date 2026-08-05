@@ -12,7 +12,7 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 from pillow_heif import register_heif_opener
 
 from app.media_group import is_media_group_path, parse_media_group_path
-from app.video_normalization import prepare_video_for_telegram
+from app.video_normalization import prepare_video_for_telegram, video_send_kwargs
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +122,7 @@ async def _send_media_group(self, chat_id: int, action, engine_module: Any) -> N
 
     for index, item in enumerate(items):
         source = self._safe_media_path(item.path)
-        caption = action.caption or None if index == 0 else None
+        caption = (action.caption or None) if index == 0 else None
         mode = engine_module.parse_mode(action.parse_mode) if index == 0 else None
 
         if item.kind == "photo":
@@ -140,13 +140,22 @@ async def _send_media_group(self, chat_id: int, action, engine_module: Any) -> N
                 source,
                 cache_dir,
             )
+            metadata_kwargs = await asyncio.to_thread(video_send_kwargs, prepared)
             media.append(
                 InputMediaVideo(
                     media=FSInputFile(prepared),
                     caption=caption,
                     parse_mode=mode,
                     supports_streaming=True,
+                    **metadata_kwargs,
                 )
+            )
+            logger.info(
+                "Sending album video %s as %s with geometry %sx%s",
+                source,
+                prepared,
+                metadata_kwargs.get("width", "auto"),
+                metadata_kwargs.get("height", "auto"),
             )
 
     await self.bot.send_media_group(
