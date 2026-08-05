@@ -42,13 +42,6 @@ class SendTextAction(BaseAction):
     stream_segments: list[StreamSegment] = Field(default_factory=list)
 
 
-def safe_relative_media_path(value: str) -> str:
-    normalized = value.replace("\\", "/").strip()
-    if not normalized or normalized.startswith(("/", "~")) or ".." in normalized.split("/"):
-        raise ValueError("Media path must be a safe repository-relative path")
-    return normalized
-
-
 class MediaAction(BaseAction):
     type: Literal["send_photo", "send_video", "send_audio", "send_document"]
     path: str
@@ -60,32 +53,12 @@ class MediaAction(BaseAction):
     @classmethod
     def safe_relative_path(cls, value: str) -> str:
         normalized = value.replace("\\", "/").strip()
-        # Compatibility with drafts exported by the temporary album:v1 format.
         if is_media_group_path(normalized):
             parse_media_group_path(normalized)
             return normalized
-        return safe_relative_media_path(normalized)
-
-
-class MediaGroupItemSpec(StrictModel):
-    kind: Literal["photo", "video"]
-    path: str
-
-    @field_validator("path")
-    @classmethod
-    def safe_relative_path(cls, value: str) -> str:
-        return safe_relative_media_path(value)
-
-
-class MediaGroupAction(MediaAction):
-    type: Literal["send_media_group"]
-    # Keep engine compatibility: media-group actions are still MediaAction instances,
-    # but this internal placeholder is excluded from exported ROADMAP JSON.
-    path: str = Field(default="media/media-group", exclude=True)
-    items: list[MediaGroupItemSpec] = Field(min_length=2, max_length=6)
-    caption: str = ""
-    parse_mode: ParseModeName = "HTML"
-    disable_notification: bool = False
+        if not normalized or normalized.startswith(("/", "~")) or ".." in normalized.split("/"):
+            raise ValueError("Media path must be a safe repository-relative path")
+        return normalized
 
 
 class DelayAction(BaseAction):
@@ -179,7 +152,6 @@ class GotoAction(BaseAction):
 Action = Annotated[
     SendTextAction
     | MediaAction
-    | MediaGroupAction
     | DelayAction
     | MemoryAction
     | AskInputAction
