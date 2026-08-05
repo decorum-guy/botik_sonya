@@ -1,0 +1,100 @@
+:root {
+  --builder-side-top: 164px;
+}
+
+.palette,
+.inspector {
+  top: var(--builder-side-top);
+  height: calc(100vh - var(--builder-side-top) - 14px);
+}
+
+.palette-item[draggable="true"] {
+  cursor: grab;
+}
+
+.palette-item.palette-dragging {
+  opacity: .45;
+}
+
+.action.palette-drop-before,
+.action.drop-before {
+  box-shadow: 0 -3px 0 var(--primary);
+}
+
+.step__actions.palette-drop-at-end::after,
+.step__actions.drop-at-end::after {
+  content: "";
+  display: block;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--primary);
+}
+
+.step.collapsed .step__actions {
+  display: none;
+}
+
+.collapse-step {
+  min-width: 28px;
+  font-size: 15px;
+  line-height: 1;
+}
+
+.album-field-v2 > .project-file-picker[hidden],
+.album-field-v2 > input[hidden] {
+  display: none !important;
+}
+
+.album-editor-v2 {
+  display: grid;
+  gap: 10px;
+}
+
+.album-item-v2 {
+  grid-template-columns: 96px minmax(0, 1fr) auto;
+}
+
+.album-item__path {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 34px;
+  gap: 5px;
+  min-width: 0;
+}
+
+.album-item__path input {
+  min-width: 0;
+}
+
+.album-browse {
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  background: #0c1425;
+}
+
+.album-browse:hover {
+  border-color: var(--primary);
+}
+
+@media (max-width: 1150px) {
+  .palette,
+  .inspector {
+    height: calc(100vh - var(--builder-side-top) - 14px);
+  }
+}
+
+@media (max-width: 760px) {
+  .palette,
+  .inspector {
+    top: auto;
+    height: auto;
+  }
+
+  .album-item-v2 {
+    grid-template-columns: 88px minmax(0, 1fr);
+  }
+
+  .album-item-v2 .album-item__tools {
+    grid-column: 2;
+  }
+}
