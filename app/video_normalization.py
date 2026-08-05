@@ -72,7 +72,7 @@ def _cache_path(path: Path, cache_dir: Path) -> Path:
     stat = path.stat()
     identity = (
         f"{CACHE_VERSION}|{path.resolve()}|{stat.st_size}|{stat.st_mtime_ns}"
-    ).encode("utf-8")
+    ).encode()
     digest = hashlib.sha256(identity).hexdigest()[:20]
     return cache_dir / f"{path.stem}-{digest}.mp4"
 
