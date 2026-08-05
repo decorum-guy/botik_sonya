@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
-from typing import Any, TypeVar
+from typing import Any
 
 from aiogram.exceptions import (
     TelegramNetworkError,
@@ -23,15 +23,13 @@ TELEGRAM_REQUEST_TIMEOUT_SECONDS = 300.0
 # succeeds or the process is deliberately stopped.
 NETWORK_RETRY_DELAYS_SECONDS = (2.0, 5.0, 10.0, 20.0, 30.0, 60.0)
 
-ResultT = TypeVar("ResultT")
-
 
 def _network_retry_delay(failure_number: int) -> float:
     index = min(max(failure_number - 1, 0), len(NETWORK_RETRY_DELAYS_SECONDS) - 1)
     return NETWORK_RETRY_DELAYS_SECONDS[index]
 
 
-async def retry_transient_telegram(
+async def retry_transient_telegram[ResultT](
     operation: Callable[[], Awaitable[ResultT]],
     *,
     chat_id: int,
