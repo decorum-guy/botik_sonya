@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from aiogram.exceptions import (
@@ -28,6 +29,56 @@ def _network_retry_delay(failure_number: int) -> float:
     return NETWORK_RETRY_DELAYS_SECONDS[index]
 
 
+async def retry_transient_telegram[ResultT](
+    operation: Callable[[], Awaitable[ResultT]],
+    *,
+    chat_id: int,
+    label: str,
+) -> ResultT:
+    """Retry temporary Telegram/proxy failures until the operation succeeds.
+
+    Permanent Bot API errors are intentionally not caught here. They must reach
+    the caller so it can choose a content-specific fallback instead of looping
+    forever on a missing file, forbidden chat or malformed request.
+    """
+
+    failure_number = 0
+    while True:
+        try:
+            result = await operation()
+            if failure_number:
+                logger.info(
+                    "Telegram delivery recovered for chat %s after %s failed attempt(s): %s",
+                    chat_id,
+                    failure_number,
+                    label,
+                )
+            return result
+        except TelegramRetryAfter as exc:
+            failure_number += 1
+            delay = max(float(exc.retry_after) + 1.0, 1.0)
+            logger.warning(
+                "Telegram rate-limited delivery to chat %s; retry %s in %.1fs: %s",
+                chat_id,
+                failure_number,
+                delay,
+                label,
+            )
+        except (TelegramNetworkError, TelegramServerError) as exc:
+            failure_number += 1
+            delay = _network_retry_delay(failure_number)
+            logger.warning(
+                "Transient Telegram failure for chat %s; retry %s in %.1fs: %s (%s)",
+                chat_id,
+                failure_number,
+                delay,
+                label,
+                exc,
+            )
+
+        await asyncio.sleep(delay)
+
+
 def install_media_retry(engine_module: Any) -> None:
     """Retry transient Telegram failures for every quest media action forever."""
 
@@ -38,41 +89,11 @@ def install_media_retry(engine_module: Any) -> None:
     original_send_media = engine_class._send_media
 
     async def _send_media(self, chat_id: int, action) -> None:
-        failure_number = 0
-        while True:
-            try:
-                await original_send_media(self, chat_id, action)
-                if failure_number:
-                    logger.info(
-                        "Media delivery recovered for chat %s after %s failed attempt(s): %s",
-                        chat_id,
-                        failure_number,
-                        action.type,
-                    )
-                return
-            except TelegramRetryAfter as exc:
-                failure_number += 1
-                delay = max(float(exc.retry_after) + 1.0, 1.0)
-                logger.warning(
-                    "Telegram rate-limited media delivery to chat %s; retry %s in %.1fs: %s",
-                    chat_id,
-                    failure_number,
-                    delay,
-                    action.type,
-                )
-            except (TelegramNetworkError, TelegramServerError) as exc:
-                failure_number += 1
-                delay = _network_retry_delay(failure_number)
-                logger.warning(
-                    "Transient Telegram media failure for chat %s; retry %s in %.1fs: %s (%s)",
-                    chat_id,
-                    failure_number,
-                    delay,
-                    action.type,
-                    exc,
-                )
-
-            await asyncio.sleep(delay)
+        await retry_transient_telegram(
+            lambda: original_send_media(self, chat_id, action),
+            chat_id=chat_id,
+            label=action.type,
+        )
 
     engine_class._send_media = _send_media
     engine_class._media_retry_installed = True

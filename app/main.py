@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 from app.admin_access import AdminAccess
 from app.config import Settings, load_settings
 from app.engine import QuestEngine
+from app.memory_capture import capture_memory_message
 from app.memory_variables import (
     MemoryVariable,
     collect_memory_variables,
@@ -373,23 +374,11 @@ async def catch_all(message: Message) -> None:
     if await admin_access.is_admin(message.from_user.id):
         session = await storage.admin_session(message.from_user.id)
         if session and session[0] == "memory_record":
-            origin = message.forward_origin
-            if origin is None:
-                await message.answer(
-                    "Это сообщение не выглядит пересланным. Для реконструкции перешли "
-                    "оригинальное сообщение из вашей переписки, а не отправляй его заново."
-                )
-                return
-            position = await storage.add_memory_message(
-                memory_id=session[1],
-                source_chat_id=message.chat.id,
-                source_message_id=message.message_id,
-                content_type=message.content_type,
-                origin_label=type(origin).__name__,
-            )
-            await message.answer(
-                f"Сохранено #{position}: <code>{message.content_type}</code>. "
-                "Когда закончишь — /memory_done."
+            await capture_memory_message(
+                storage,
+                message,
+                session[1],
+                finish_command="/memory_done",
             )
         return
 
