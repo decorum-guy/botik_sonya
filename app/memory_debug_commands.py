@@ -16,6 +16,7 @@ DEBUG_COMMANDS = {
     "/memory_debug_on",
     "/memory_debug_off",
     "/memory_debug_status",
+    "/memory_preview_batch",
 }
 
 
