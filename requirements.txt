@@ -5,3 +5,5 @@ pydantic>=2.10.0,<3.0
 pydantic-settings>=2.7.0,<3.0
 aiohttp-socks>=0.10.1,<1.0
 python-dotenv>=1.0.1,<2.0
+Pillow>=12.3.0,<13.0
+pillow-heif>=1.5.0,<2.0
