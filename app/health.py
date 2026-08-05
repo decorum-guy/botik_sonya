@@ -113,5 +113,10 @@ async def admin_ping(message: Message) -> None:
 def install_admin_ping(router: Router) -> None:
     if getattr(router, "_admin_ping_installed", False):
         return
+
+    # app.main has a final catch-all message handler. Register normally and then
+    # move /ping to the front so the generic handler cannot swallow the command.
     router.message.register(admin_ping, Command("ping"))
+    handler = router.message.handlers.pop()
+    router.message.handlers.insert(0, handler)
     router._admin_ping_installed = True
