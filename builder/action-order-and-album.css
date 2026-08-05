@@ -3,6 +3,10 @@
   --builder-sticky-top: 78px;
 }
 
+body .test-runner {
+  top: var(--topbar-height, 64px);
+}
+
 .palette,
 .inspector {
   top: var(--builder-sticky-top);
