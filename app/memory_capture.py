@@ -18,6 +18,11 @@ def _entity_type_value(entity: Any) -> str:
     return str(getattr(value, "value", value))
 
 
+def content_type_value(message: Message) -> str:
+    value = message.content_type
+    return str(getattr(value, "value", value))
+
+
 def custom_emoji_count(message: Message) -> int:
     entities = list(message.entities or []) + list(message.caption_entities or [])
     return sum(_entity_type_value(entity) == "custom_emoji" for entity in entities)
@@ -52,7 +57,7 @@ def memory_content_label(message: Message) -> str:
     if emoji_count:
         return f"текст с пользовательскими эмоджи ×{emoji_count}"
 
-    return str(message.content_type)
+    return content_type_value(message)
 
 
 def is_command_message(message: Message) -> bool:
@@ -123,6 +128,7 @@ async def capture_memory_message(
     origin = message.forward_origin
     origin_label = type(origin).__name__ if origin is not None else "NoForwardOrigin"
     content_label = memory_content_label(message)
+    content_type = content_type_value(message)
 
     try:
         async with _capture_lock(storage, memory_id):
@@ -150,7 +156,7 @@ async def capture_memory_message(
                 memory_id=memory_id,
                 source_chat_id=message.chat.id,
                 source_message_id=message.message_id,
-                content_type=str(message.content_type),
+                content_type=content_type,
                 origin_label=f"{origin_label}|{content_label}",
             )
     except Exception as exc:
@@ -170,7 +176,7 @@ async def capture_memory_message(
         memory_id=memory_id,
         position=position,
         content_label=content_label,
-        content_type=str(message.content_type),
+        content_type=content_type,
         media_group_id=message.media_group_id,
         forward_origin_type=type(origin).__name__ if origin is not None else None,
     )
