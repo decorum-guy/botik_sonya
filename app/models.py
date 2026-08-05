@@ -5,6 +5,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.button_styles import ButtonStyleAlias
+from app.media_group import is_media_group_path, parse_media_group_path
 
 
 ParseModeName = Literal["HTML", "MarkdownV2", "none"]
@@ -52,6 +53,9 @@ class MediaAction(BaseAction):
     @classmethod
     def safe_relative_path(cls, value: str) -> str:
         normalized = value.replace("\\", "/").strip()
+        if is_media_group_path(normalized):
+            parse_media_group_path(normalized)
+            return normalized
         if not normalized or normalized.startswith(("/", "~")) or ".." in normalized.split("/"):
             raise ValueError("Media path must be a safe repository-relative path")
         return normalized
