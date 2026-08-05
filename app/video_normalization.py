@@ -140,7 +140,7 @@ def probe_video_metadata(path: Path) -> VideoMetadata:
 def safe_video_metadata(path: Path) -> VideoMetadata | None:
     try:
         return probe_video_metadata(path)
-    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
         logger.warning(
             "Could not read video metadata for %s; Telegram will inspect it: %s",
             path,
