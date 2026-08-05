@@ -16,7 +16,7 @@
   border-radius: 999px;
   background: var(--primary);
 }
-.album-field > .project-file-picker[hidden],
+.album-field .project-file-picker,
 .album-field > input[hidden] {
   display: none;
 }
