@@ -14,7 +14,7 @@ from app.media_group import (
     encode_media_group_path,
     parse_media_group_path,
 )
-from app.models import MediaAction
+from app.models import MediaAction, MediaGroupAction, Roadmap
 
 
 def test_media_group_path_round_trip_uses_single_line_encoding() -> None:
@@ -58,7 +58,7 @@ def test_media_group_rejects_unsafe_or_wrong_item_count() -> None:
         )
 
 
-def test_media_action_validates_media_group_payload() -> None:
+def test_legacy_media_action_validates_media_group_payload() -> None:
     action = MediaAction(
         type="send_photo",
         path=encode_media_group_path(
@@ -77,7 +77,54 @@ def test_media_action_validates_media_group_payload() -> None:
         )
 
 
-def test_send_media_group_normalizes_photos_and_prepares_videos(
+def test_native_media_group_action_validates_and_exports_clean_json() -> None:
+    roadmap = Roadmap.model_validate(
+        {
+            "meta": {"entry_step_id": "start"},
+            "steps": [
+                {
+                    "id": "start",
+                    "title": "Start",
+                    "actions": [
+                        {
+                            "type": "send_media_group",
+                            "items": [
+                                {"kind": "photo", "path": "media/one.heic"},
+                                {"kind": "video", "path": "media/two.mp4"},
+                            ],
+                            "caption": "Album",
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    action = roadmap.steps[0].actions[0]
+    assert isinstance(action, MediaGroupAction)
+    assert isinstance(action, MediaAction)
+    dumped_action = roadmap.model_dump(mode="json")["steps"][0]["actions"][0]
+    assert dumped_action["type"] == "send_media_group"
+    assert "path" not in dumped_action
+    assert len(dumped_action["items"]) == 2
+
+    with pytest.raises(ValidationError):
+        MediaGroupAction(
+            type="send_media_group",
+            items=[{"kind": "photo", "path": "media/only.jpg"}],
+        )
+
+    with pytest.raises(ValidationError):
+        MediaGroupAction(
+            type="send_media_group",
+            items=[
+                {"kind": "photo", "path": "media/one.jpg"},
+                {"kind": "video", "path": "../outside.mp4"},
+            ],
+        )
+
+
+def test_send_native_media_group_normalizes_photos_and_prepares_videos(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -110,12 +157,11 @@ def test_send_media_group_normalizes_photos_and_prepares_videos(
             return self.root / relative
 
     action = SimpleNamespace(
-        path=encode_media_group_path(
-            [
-                MediaGroupItem(kind="photo", path="media/one.heic"),
-                MediaGroupItem(kind="video", path="media/two.mp4"),
-            ]
-        ),
+        type="send_media_group",
+        items=[
+            SimpleNamespace(kind="photo", path="media/one.heic"),
+            SimpleNamespace(kind="video", path="media/two.mp4"),
+        ],
         caption="Общая подпись",
         parse_mode="HTML",
         disable_notification=True,
