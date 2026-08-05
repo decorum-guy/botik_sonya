@@ -5,11 +5,12 @@ from typing import Any, Awaitable, Callable
 from aiogram import BaseMiddleware
 from aiogram.types import CallbackQuery, Message, TelegramObject
 
+from app.memory_debug import memory_debug
 from app.storage import Storage
 
 
 class UserTrackingMiddleware(BaseMiddleware):
-    """Persist every private user who sends a message or presses a bot button."""
+    """Persist private users and feed message updates into memory debug logs."""
 
     def __init__(self, storage: Storage) -> None:
         self.storage = storage
@@ -37,6 +38,14 @@ class UserTrackingMiddleware(BaseMiddleware):
                 username=user.username,
                 first_name=user.first_name,
                 last_name=user.last_name,
+            )
+
+        if isinstance(event, Message) and event.from_user is not None:
+            update = data.get("event_update")
+            await memory_debug.record_incoming(
+                event.from_user.id,
+                event,
+                update_id=getattr(update, "update_id", None),
             )
 
         return await handler(event, data)
