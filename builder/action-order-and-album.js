@@ -1,12 +1,26 @@
 (() => {
   "use strict";
 
-  const DRAFT_KEY = "botik-sonya-roadmap-v1";
-  const ALBUM_PREFIX = "album:v1";
+  const V2_PREFIX = "album:v2:";
+  const V1_PREFIX = "album:v1";
   const MIN_ITEMS = 2;
   const MAX_ITEMS = 6;
+  const paletteTypes = new Map([
+    ["Текст", "send_text"],
+    ["Фото", "send_photo"],
+    ["Видео", "send_video"],
+    ["Аудио", "send_audio"],
+    ["Документ", "send_document"],
+    ["Воспоминание", "memory_reconstruction"],
+    ["Ожидание ответа", "ask_input"],
+    ["Кнопки", "buttons"],
+    ["Пауза", "delay"],
+    ["Переход", "goto"],
+  ]);
+
   let redirectingDrop = false;
   let enhanceScheduled = false;
+  let paletteDrag = null;
 
   function scheduleEnhance() {
     if (enhanceScheduled) return;
@@ -14,6 +28,7 @@
     requestAnimationFrame(() => {
       enhanceScheduled = false;
       addAlbumPaletteButton();
+      enhancePaletteDrag();
       enhanceActionCards();
       enhanceAlbumInspector();
     });
@@ -27,12 +42,12 @@
 
   function addAlbumPaletteButton() {
     const list = document.querySelector("#palette-list");
-    if (!list || list.querySelector('[data-action-type="send-media-group"]')) return;
+    if (!list || list.querySelector('[data-builder-action-type="send_media_group"]')) return;
 
     const button = document.createElement("button");
     button.type = "button";
     button.className = "palette-item";
-    button.dataset.actionType = "send-media-group";
+    button.dataset.builderActionType = "send_media_group";
     button.innerHTML = `
       <span class="palette-item__icon">🗂</span>
       <span><strong>Медиагруппа</strong><small>От 2 до 6 фото или видео одним альбомом</small></span>`;
@@ -45,9 +60,35 @@
     else list.append(button);
   }
 
+  function enhancePaletteDrag() {
+    document.querySelectorAll("#palette-list .palette-item").forEach((button) => {
+      if (!button.dataset.builderActionType) {
+        const title = button.querySelector("strong")?.textContent?.trim() || "";
+        const type = paletteTypes.get(title);
+        if (type) button.dataset.builderActionType = type;
+      }
+      const type = button.dataset.builderActionType;
+      if (!type || button.dataset.paletteDragEnhanced === "true") return;
+      button.dataset.paletteDragEnhanced = "true";
+      button.draggable = true;
+      button.addEventListener("dragstart", (event) => {
+        paletteDrag = { type, button };
+        button.classList.add("dragging");
+        event.dataTransfer.effectAllowed = "copy";
+        event.dataTransfer.setData("text/plain", `roadmap-action:${type}`);
+      });
+      button.addEventListener("dragend", () => {
+        paletteDrag = null;
+        button.classList.remove("dragging");
+        clearDropIndicators();
+      });
+    });
+  }
+
   function createAlbumAction() {
     const photoButton = [...document.querySelectorAll("#palette-list .palette-item")].find((item) =>
-      item.querySelector("strong")?.textContent?.trim() === "Фото"
+      item.dataset.builderActionType === "send_photo"
+      || item.querySelector("strong")?.textContent?.trim() === "Фото"
     );
     if (!photoButton) return;
 
@@ -66,20 +107,55 @@
   }
 
   function parseAlbum(value) {
-    const lines = String(value || "").replaceAll("\r\n", "\n").trim().split("\n");
-    if (lines[0] !== ALBUM_PREFIX) return null;
-    return lines.slice(1).filter(Boolean).map((line) => {
-      const separator = line.indexOf("\t");
-      if (separator < 0) return { kind: "photo", path: line.trim() };
-      return {
-        kind: line.slice(0, separator).trim() === "video" ? "video" : "photo",
-        path: line.slice(separator + 1).trim(),
-      };
-    });
+    const raw = String(value || "").replaceAll("\r\n", "\n").trim();
+    if (raw.startsWith(V2_PREFIX)) {
+      try {
+        const decoded = JSON.parse(decodeURIComponent(raw.slice(V2_PREFIX.length)));
+        if (!Array.isArray(decoded)) return null;
+        return decoded.map(normalizeItem).filter(Boolean);
+      } catch (_) {
+        return null;
+      }
+    }
+    if (!raw.startsWith(V1_PREFIX)) return null;
+
+    const lines = raw.split("\n").slice(1).filter(Boolean);
+    if (lines.length) {
+      const items = lines.map((line) => {
+        const separator = line.indexOf("\t");
+        if (separator < 0) return null;
+        return normalizeItem({
+          kind: line.slice(0, separator),
+          path: line.slice(separator + 1),
+        });
+      });
+      return items.every(Boolean) ? items : null;
+    }
+
+    const remainder = raw.slice(V1_PREFIX.length);
+    const matches = [...remainder.matchAll(
+      /(photo|video)\s+(media\/.+?)(?=(?:photo|video)\s+media\/|$)/gi
+    )];
+    const items = matches.map((match) => normalizeItem({
+      kind: match[1],
+      path: match[2],
+    })).filter(Boolean);
+    return items.length ? items : null;
+  }
+
+  function normalizeItem(item) {
+    const kind = String(item?.kind || "").trim().toLowerCase();
+    const path = String(item?.path || "").trim();
+    if (!["photo", "video"].includes(kind) || !path) return null;
+    return { kind, path };
   }
 
   function encodeAlbum(items) {
-    return [ALBUM_PREFIX, ...items.map((item) => `${item.kind}\t${item.path.trim()}`)].join("\n");
+    const payload = JSON.stringify(items.map((item) => ({
+      kind: item.kind === "video" ? "video" : "photo",
+      path: String(item.path || "").trim(),
+    })));
+    return `${V2_PREFIX}${encodeURIComponent(payload)}`;
   }
 
   function albumSummary(items) {
@@ -95,14 +171,17 @@
     document.querySelectorAll(".action").forEach((row) => {
       addMoveButtons(row);
       const summary = row.querySelector(".action__content small");
-      const items = parseAlbum(summary?.textContent || "");
+      const raw = summary?.dataset.rawAlbumPath || summary?.textContent || "";
+      const items = parseAlbum(raw);
       if (!items) return;
+
+      summary.dataset.rawAlbumPath = raw;
       row.dataset.mediaGroup = "true";
       const title = row.querySelector(".action__content strong");
       const icon = row.querySelector(".action__icon");
       if (title) title.textContent = "Медиагруппа";
       if (icon) icon.textContent = "🗂";
-      if (summary) summary.textContent = albumSummary(items);
+      summary.textContent = albumSummary(items);
     });
   }
 
@@ -153,9 +232,18 @@
 
   function dragEvent(type, options = {}) {
     let dataTransfer;
-    try { dataTransfer = new DataTransfer(); } catch (_) { dataTransfer = { effectAllowed: "move" }; }
     try {
-      return new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer, ...options });
+      dataTransfer = new DataTransfer();
+    } catch (_) {
+      dataTransfer = { effectAllowed: "move" };
+    }
+    try {
+      return new DragEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        dataTransfer,
+        ...options,
+      });
     } catch (_) {
       const event = new Event(type, { bubbles: true, cancelable: true });
       Object.defineProperty(event, "dataTransfer", { value: dataTransfer });
@@ -180,27 +268,64 @@
     }) || container;
   }
 
+  function insertionIndex(container, clientY) {
+    const rows = actionRows(container);
+    const target = rows.find((row) => {
+      const rect = row.getBoundingClientRect();
+      return clientY < rect.top + rect.height / 2;
+    });
+    return target ? rows.indexOf(target) : rows.length;
+  }
+
   function clearDropIndicators() {
-    document.querySelectorAll(".action.drop-before").forEach((row) => row.classList.remove("drop-before"));
-    document.querySelectorAll(".step__actions.drop-at-end").forEach((container) => container.classList.remove("drop-at-end"));
+    document.querySelectorAll(".action.drop-before").forEach((row) => {
+      row.classList.remove("drop-before");
+    });
+    document.querySelectorAll(".step__actions.drop-at-end").forEach((container) => {
+      container.classList.remove("drop-at-end");
+    });
+  }
+
+  function showDropIndicator(container, clientY) {
+    clearDropIndicators();
+    const target = insertionTarget(container, clientY);
+    if (target === container) container.classList.add("drop-at-end");
+    else target.classList.add("drop-before");
   }
 
   document.addEventListener("dragover", (event) => {
-    if (!document.querySelector(".action.dragging")) return;
     const container = event.target.closest?.(".step__actions");
     if (!container) return;
+
+    if (paletteDrag) {
+      event.preventDefault();
+      event.stopPropagation();
+      event.dataTransfer.dropEffect = "copy";
+      showDropIndicator(container, event.clientY);
+      return;
+    }
+
+    if (!document.querySelector(".action.dragging")) return;
     event.preventDefault();
-    clearDropIndicators();
-    const target = insertionTarget(container, event.clientY);
-    if (target === container) container.classList.add("drop-at-end");
-    else target.classList.add("drop-before");
+    showDropIndicator(container, event.clientY);
   }, true);
 
   document.addEventListener("drop", (event) => {
-    if (redirectingDrop || !document.querySelector(".action.dragging")) return;
     const container = event.target.closest?.(".step__actions");
     if (!container) return;
 
+    if (paletteDrag) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const stepId = container.dataset.stepId;
+      const targetIndex = insertionIndex(container, event.clientY);
+      const type = paletteDrag.type;
+      clearDropIndicators();
+      addPaletteActionAt(type, stepId, targetIndex);
+      return;
+    }
+
+    if (redirectingDrop || !document.querySelector(".action.dragging")) return;
     const target = insertionTarget(container, event.clientY);
     event.preventDefault();
     event.stopImmediatePropagation();
@@ -212,6 +337,31 @@
   }, true);
 
   document.addEventListener("dragend", clearDropIndicators, true);
+
+  function addPaletteActionAt(type, stepId, targetIndex) {
+    const stepHead = document.querySelector(`.step[data-step-id="${cssEscape(stepId)}"] .step__head`);
+    stepHead?.click();
+
+    const button = document.querySelector(
+      `#palette-list .palette-item[data-builder-action-type="${cssEscape(type)}"]`
+    );
+    button?.click();
+
+    const newRow = document.querySelector(".action.selected");
+    if (!newRow) return;
+    const refreshedContainer = document.querySelector(
+      `.step[data-step-id="${cssEscape(stepId)}"] .step__actions`
+    );
+    if (!refreshedContainer) return;
+    const rows = actionRows(refreshedContainer);
+    const currentIndex = rows.indexOf(newRow);
+    if (targetIndex >= currentIndex) return;
+    dispatchMove(newRow, rows[targetIndex]);
+  }
+
+  function cssEscape(value) {
+    return window.CSS?.escape ? CSS.escape(value) : String(value).replace(/["\\]/g, "\\$&");
+  }
 
   function enhanceAlbumInspector() {
     const pathField = fieldByLabel("Путь к файлу");
@@ -235,11 +385,22 @@
     editor.append(list, footer);
     pathField.append(editor);
 
+    function updateSelectedCard() {
+      const summary = document.querySelector(".action.selected .action__content small");
+      if (!summary) return;
+      summary.dataset.rawAlbumPath = canonicalInput.value;
+      summary.textContent = albumSummary(items);
+      const row = summary.closest(".action");
+      row.dataset.mediaGroup = "true";
+      row.querySelector(".action__content strong").textContent = "Медиагруппа";
+      row.querySelector(".action__icon").textContent = "🗂";
+    }
+
     function sync() {
       canonicalInput.value = encodeAlbum(items);
       canonicalInput.dispatchEvent(new Event("input", { bubbles: true }));
       renderItems();
-      enhanceActionCards();
+      updateSelectedCard();
     }
 
     function renderItems() {
@@ -251,22 +412,40 @@
         const select = document.createElement("select");
         select.innerHTML = '<option value="photo">Фото</option><option value="video">Видео</option>';
         select.value = item.kind;
-        select.addEventListener("change", () => { item.kind = select.value; sync(); });
+        select.addEventListener("change", () => {
+          item.kind = select.value;
+          sync();
+        });
 
         const input = document.createElement("input");
         input.value = item.path;
-        input.placeholder = item.kind === "video" ? "media/videos/video.mp4" : "media/photos/photo.jpg";
+        input.placeholder = item.kind === "video"
+          ? "media/videos/video.mp4"
+          : "media/photos/photo.jpg";
+        input.className = "album-item__path";
+        input.dataset.mediaKind = item.kind;
         input.addEventListener("input", () => {
           item.path = input.value;
           canonicalInput.value = encodeAlbum(items);
           canonicalInput.dispatchEvent(new Event("input", { bubbles: true }));
+          updateSelectedCard();
         });
 
         const controls = document.createElement("div");
         controls.className = "album-item__tools";
         const up = toolButton("album-up", "↑", "Поднять внутри альбома", index === 0);
-        const down = toolButton("album-down", "↓", "Опустить внутри альбома", index === items.length - 1);
-        const remove = toolButton("album-remove", "✕", "Удалить из альбома", items.length <= MIN_ITEMS);
+        const down = toolButton(
+          "album-down",
+          "↓",
+          "Опустить внутри альбома",
+          index === items.length - 1
+        );
+        const remove = toolButton(
+          "album-remove",
+          "✕",
+          "Удалить из альбома",
+          items.length <= MIN_ITEMS
+        );
         up.addEventListener("click", () => {
           [items[index - 1], items[index]] = [items[index], items[index - 1]];
           sync();
@@ -275,7 +454,10 @@
           [items[index], items[index + 1]] = [items[index + 1], items[index]];
           sync();
         });
-        remove.addEventListener("click", () => { items.splice(index, 1); sync(); });
+        remove.addEventListener("click", () => {
+          items.splice(index, 1);
+          sync();
+        });
         controls.append(up, down, remove);
         row.append(select, input, controls);
         list.append(row);
@@ -304,31 +486,35 @@
       footer.append(addPhoto, addVideo, count);
     }
 
-    renderItems();
+    // Immediately migrate any legacy one-line or multiline value to v2.
+    sync();
   }
 
   function albumErrors() {
     const errors = [];
     document.querySelectorAll(".action").forEach((row) => {
-      const raw = row.querySelector(".action__content small")?.dataset.rawAlbumPath
-        || row.querySelector(".action__content small")?.textContent
-        || "";
-      let items = parseAlbum(raw);
-      if (!items && row.dataset.mediaGroup === "true") {
-        const pathField = row.classList.contains("selected") ? fieldByLabel("Путь к файлу") : null;
-        items = parseAlbum(pathField?.querySelector("input")?.value || "");
-      }
+      const summary = row.querySelector(".action__content small");
+      const raw = summary?.dataset.rawAlbumPath || summary?.textContent || "";
+      const items = parseAlbum(raw);
       if (!items) return;
       if (items.length < MIN_ITEMS || items.length > MAX_ITEMS) {
         errors.push("Медиагруппа должна содержать от 2 до 6 элементов.");
       }
       items.forEach((item, index) => {
-        if (!item.path || item.path.startsWith("/") || item.path.startsWith("~") || item.path.split("/").includes("..")) {
+        if (!isSafePath(item.path)) {
           errors.push(`Медиагруппа, элемент ${index + 1}: некорректный путь.`);
         }
       });
     });
     return errors;
+  }
+
+  function isSafePath(path) {
+    const normalized = String(path || "").replaceAll("\\", "/").trim();
+    return Boolean(normalized)
+      && !normalized.startsWith("/")
+      && !normalized.startsWith("~")
+      && !normalized.split("/").includes("..");
   }
 
   function showAlbumErrors(errors) {
@@ -363,18 +549,5 @@
 
   const observer = new MutationObserver(scheduleEnhance);
   observer.observe(document.body, { childList: true, subtree: true });
-
-  // Preserve the encoded path before replacing the visible card summary.
-  const rawObserver = new MutationObserver(() => {
-    document.querySelectorAll(".action .action__content small").forEach((summary) => {
-      if (summary.textContent.startsWith(`${ALBUM_PREFIX}\n`)) {
-        summary.dataset.rawAlbumPath = summary.textContent;
-      }
-    });
-  });
-  rawObserver.observe(document.querySelector("#steps"), { childList: true, subtree: true });
-
-  // Keep the draft key referenced so future migrations can reuse this script safely.
-  void DRAFT_KEY;
   scheduleEnhance();
 })();
