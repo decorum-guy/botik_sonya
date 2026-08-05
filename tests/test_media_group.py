@@ -17,18 +17,35 @@ from app.media_group import (
 from app.models import MediaAction
 
 
-def test_media_group_path_round_trip() -> None:
+def test_media_group_path_round_trip_uses_single_line_encoding() -> None:
     encoded = encode_media_group_path(
         [
-            MediaGroupItem(kind="photo", path="media/one.jpg"),
+            MediaGroupItem(kind="photo", path="media/фото один.jpg"),
             MediaGroupItem(kind="video", path="media/two.mp4"),
         ]
     )
 
+    assert encoded.startswith("album:v2:")
+    assert "\n" not in encoded
+    assert "\t" not in encoded
     assert parse_media_group_path(encoded) == [
-        MediaGroupItem(kind="photo", path="media/one.jpg"),
+        MediaGroupItem(kind="photo", path="media/фото один.jpg"),
         MediaGroupItem(kind="video", path="media/two.mp4"),
     ]
+
+
+def test_media_group_parses_legacy_multiline_and_compacted_builder_values() -> None:
+    expected = [
+        MediaGroupItem(kind="photo", path="media/photos/photo-1.jpg"),
+        MediaGroupItem(kind="video", path="media/videos/video-2.mp4"),
+    ]
+
+    assert parse_media_group_path(
+        "album:v1\nphoto\tmedia/photos/photo-1.jpg\nvideo\tmedia/videos/video-2.mp4"
+    ) == expected
+    assert parse_media_group_path(
+        "album:v1photo media/photos/photo-1.jpgvideo media/videos/video-2.mp4"
+    ) == expected
 
 
 def test_media_group_rejects_unsafe_or_wrong_item_count() -> None:
@@ -44,7 +61,12 @@ def test_media_group_rejects_unsafe_or_wrong_item_count() -> None:
 def test_media_action_validates_media_group_payload() -> None:
     action = MediaAction(
         type="send_photo",
-        path="album:v1\nphoto\tmedia/one.jpg\nvideo\tmedia/two.mp4",
+        path=encode_media_group_path(
+            [
+                MediaGroupItem(kind="photo", path="media/one.jpg"),
+                MediaGroupItem(kind="video", path="media/two.mp4"),
+            ]
+        ),
     )
     assert len(parse_media_group_path(action.path)) == 2
 
@@ -88,7 +110,12 @@ def test_send_media_group_normalizes_photos_and_prepares_videos(
             return self.root / relative
 
     action = SimpleNamespace(
-        path="album:v1\nphoto\tmedia/one.heic\nvideo\tmedia/two.mp4",
+        path=encode_media_group_path(
+            [
+                MediaGroupItem(kind="photo", path="media/one.heic"),
+                MediaGroupItem(kind="video", path="media/two.mp4"),
+            ]
+        ),
         caption="Общая подпись",
         parse_mode="HTML",
         disable_notification=True,
