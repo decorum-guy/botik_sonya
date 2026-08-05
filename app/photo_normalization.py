@@ -115,20 +115,14 @@ def normalize_photo_bytes(path: Path) -> bytes:
     )
 
 
-def _media_group_items(action) -> list[Any]:
-    if action.type == "send_media_group":
-        return list(action.items)
-    return parse_media_group_path(action.path)
-
-
 async def _send_media_group(self, chat_id: int, action, engine_module: Any) -> None:
-    items = _media_group_items(action)
+    items = parse_media_group_path(action.path)
     media = []
     cache_dir = self.root / ".cache" / "telegram_media"
 
     for index, item in enumerate(items):
         source = self._safe_media_path(item.path)
-        caption = (action.caption or None) if index == 0 else None
+        caption = action.caption or None if index == 0 else None
         mode = engine_module.parse_mode(action.parse_mode) if index == 0 else None
 
         if item.kind == "photo":
@@ -170,11 +164,7 @@ def install_photo_normalization(engine_module: Any) -> None:
     original_send_media = engine_class._send_media
 
     async def _send_media(self, chat_id: int, action) -> None:
-        is_legacy_group = (
-            action.type == "send_photo"
-            and is_media_group_path(action.path)
-        )
-        if action.type == "send_media_group" or is_legacy_group:
+        if action.type == "send_photo" and is_media_group_path(action.path):
             await _send_media_group(self, chat_id, action, engine_module)
             return
 
