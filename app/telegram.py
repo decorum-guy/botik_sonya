@@ -7,8 +7,8 @@ from aiogram.enums import ParseMode
 
 from app.config import Settings
 from app.health import install_admin_ping
-from app.media_debug_commands import install_memory_debug
 from app.media_retry import TELEGRAM_REQUEST_TIMEOUT_SECONDS
+from app.memory_debug_commands import install_memory_debug
 
 
 def build_bot(settings: Settings) -> Bot:
