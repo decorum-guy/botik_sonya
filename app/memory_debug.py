@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Awaitable, Callable
@@ -88,6 +88,7 @@ class DebugSession:
     path: Path
     started_at: str
     events: int = 0
+    seen_incoming: set[str] = field(default_factory=set)
 
 
 class MemoryDebugRecorder:
@@ -129,6 +130,7 @@ class MemoryDebugRecorder:
                     "event": "debug_stopped",
                     "admin_id": admin_id,
                     "recorded_events": session.events,
+                    "unique_incoming_messages": len(session.seen_incoming),
                 },
             )
             return session
@@ -136,6 +138,35 @@ class MemoryDebugRecorder:
     async def status(self, admin_id: int) -> DebugSession | None:
         async with self._lock:
             return self._sessions.get(admin_id)
+
+    async def record_incoming(
+        self,
+        admin_id: int,
+        message: Message,
+        *,
+        update_id: int | None,
+    ) -> None:
+        async with self._lock:
+            session = self._sessions.get(admin_id)
+            if session is None:
+                return
+            key = (
+                f"update:{update_id}"
+                if update_id is not None
+                else f"message:{message.chat.id}:{message.message_id}"
+            )
+            if key in session.seen_incoming:
+                return
+            session.seen_incoming.add(key)
+            self._append_unlocked(
+                session,
+                {
+                    "timestamp": _utc_now(),
+                    "event": "incoming_message",
+                    "update_id": update_id,
+                    "message": message_debug_payload(message),
+                },
+            )
 
     async def record(
         self,
@@ -177,11 +208,10 @@ class MemoryDebugMiddleware(BaseMiddleware):
 
         admin_id = event.from_user.id
         update = data.get("event_update")
-        await memory_debug.record(
+        await memory_debug.record_incoming(
             admin_id,
-            "incoming_message",
+            event,
             update_id=getattr(update, "update_id", None),
-            message=message_debug_payload(event),
         )
         try:
             return await handler(event, data)
