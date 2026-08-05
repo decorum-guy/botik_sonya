@@ -7,6 +7,7 @@ from aiogram.enums import ParseMode
 
 from app.config import Settings
 from app.health import install_admin_ping
+from app.media_debug_commands import install_memory_debug
 from app.media_retry import TELEGRAM_REQUEST_TIMEOUT_SECONDS
 
 
@@ -23,8 +24,10 @@ def build_bot(settings: Settings) -> Bot:
     )
 
     # app.main has finished defining its router by the time build_bot is called.
-    # Register lazily here so both the normal bot and Roadmap Studio expose /ping.
+    # Register lazily here so both the normal bot and Roadmap Studio expose
+    # diagnostic admin commands before the final catch-all handler.
     import app.main as bot_app
 
     install_admin_ping(bot_app.router)
+    install_memory_debug(bot_app.router)
     return bot
