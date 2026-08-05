@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,11 +19,11 @@ def _label_for(action: dict[str, Any], memory_id: str, order: int) -> str:
     for key in ("title", "date_text", "intro"):
         value = action.get(key)
         if isinstance(value, str) and value.strip():
-            return value.strip().splitlines()[0][:120]
+            return html.escape(value.strip().splitlines()[0][:120])
     number = action.get("number")
     if number not in (None, ""):
         return f"Воспоминание {number}"
-    return f"Воспоминание {order}: {memory_id}"
+    return f"Воспоминание {order}: {html.escape(memory_id)}"
 
 
 def collect_memory_variables_from_data(data: dict[str, Any]) -> list[MemoryVariable]:
