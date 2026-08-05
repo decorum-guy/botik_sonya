@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
 from io import BytesIO
 from pathlib import Path
 from typing import Any
 
-from aiogram.types import BufferedInputFile
+from aiogram.types import BufferedInputFile, FSInputFile, InputMediaPhoto, InputMediaVideo
 from PIL import Image, ImageOps, UnidentifiedImageError
 from pillow_heif import register_heif_opener
+
+from app.media_group import is_media_group_path, parse_media_group_path
+from app.video_normalization import prepare_video_for_telegram
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +115,47 @@ def normalize_photo_bytes(path: Path) -> bytes:
     )
 
 
+async def _send_media_group(self, chat_id: int, action, engine_module: Any) -> None:
+    items = parse_media_group_path(action.path)
+    media = []
+    cache_dir = self.root / ".cache" / "telegram_media"
+
+    for index, item in enumerate(items):
+        source = self._safe_media_path(item.path)
+        caption = action.caption or None if index == 0 else None
+        mode = engine_module.parse_mode(action.parse_mode) if index == 0 else None
+
+        if item.kind == "photo":
+            payload = await asyncio.to_thread(normalize_photo_bytes, source)
+            upload = BufferedInputFile(payload, filename=f"{source.stem}.jpg")
+            media.append(InputMediaPhoto(media=upload, caption=caption, parse_mode=mode))
+            logger.info(
+                "Normalized album photo %s for Telegram: %.1f KB",
+                item.path,
+                len(payload) / 1024,
+            )
+        else:
+            prepared = await asyncio.to_thread(
+                prepare_video_for_telegram,
+                source,
+                cache_dir,
+            )
+            media.append(
+                InputMediaVideo(
+                    media=FSInputFile(prepared),
+                    caption=caption,
+                    parse_mode=mode,
+                    supports_streaming=True,
+                )
+            )
+
+    await self.bot.send_media_group(
+        chat_id=chat_id,
+        media=media,
+        disable_notification=action.disable_notification,
+    )
+
+
 def install_photo_normalization(engine_module: Any) -> None:
     engine_class = engine_module.QuestEngine
     if getattr(engine_class, "_photo_normalization_installed", False):
@@ -119,12 +164,16 @@ def install_photo_normalization(engine_module: Any) -> None:
     original_send_media = engine_class._send_media
 
     async def _send_media(self, chat_id: int, action) -> None:
+        if action.type == "send_photo" and is_media_group_path(action.path):
+            await _send_media_group(self, chat_id, action, engine_module)
+            return
+
         if action.type != "send_photo":
             await original_send_media(self, chat_id, action)
             return
 
         path = self._safe_media_path(action.path)
-        payload = normalize_photo_bytes(path)
+        payload = await asyncio.to_thread(normalize_photo_bytes, path)
         file = BufferedInputFile(payload, filename=f"{path.stem}.jpg")
         kwargs = {
             "chat_id": chat_id,
