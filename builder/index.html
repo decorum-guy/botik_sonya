@@ -7,7 +7,6 @@
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="editor-enhancements.css">
-  <link rel="stylesheet" href="action-order-and-album.css">
   <link rel="stylesheet" href="test-runner.css">
   <link rel="stylesheet" href="builder-ux-fixes.css">
 </head>
@@ -32,7 +31,7 @@
     <aside class="palette panel">
       <div class="panel__head">
         <h2>Блоки</h2>
-        <p>Выбери этап и добавляй действия.</p>
+        <p>Нажми для добавления вниз или перетащи блок в нужное место.</p>
       </div>
       <div id="palette-list" class="palette-list"></div>
       <button id="add-step" class="button wide primary">＋ Новый этап</button>
@@ -78,13 +77,12 @@
   </template>
 
   <script src="app.js"></script>
-  <script src="album-card-state.js"></script>
   <script src="step-id-focus-fix.js"></script>
   <script src="editor-enhancements.js"></script>
-  <script src="action-order-and-album.js"></script>
   <script src="callback-feedback-editor.js"></script>
   <script src="streaming-text-editor.js"></script>
   <script src="test-runner.js"></script>
+  <script src="sticky-panel-offset.js"></script>
   <script src="memory-variables-panel.js"></script>
   <script src="scroll-position-fix.js"></script>
   <script src="editor-navigation.js"></script>
