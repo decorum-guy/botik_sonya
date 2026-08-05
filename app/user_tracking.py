@@ -5,15 +5,17 @@ from typing import Any, Awaitable, Callable
 from aiogram import BaseMiddleware
 from aiogram.types import CallbackQuery, Message, TelegramObject
 
+from app.memory_capture_middleware import MemoryCaptureMiddleware
 from app.memory_debug import memory_debug
 from app.storage import Storage
 
 
 class UserTrackingMiddleware(BaseMiddleware):
-    """Persist private users and feed message updates into memory debug logs."""
+    """Persist private users, log updates and protect memory capture in Studio."""
 
     def __init__(self, storage: Storage) -> None:
         self.storage = storage
+        self.memory_capture = MemoryCaptureMiddleware(storage)
 
     async def __call__(
         self,
@@ -48,4 +50,7 @@ class UserTrackingMiddleware(BaseMiddleware):
                 update_id=getattr(update, "update_id", None),
             )
 
-        return await handler(event, data)
+        # Roadmap Studio includes its own routers before app.main. Capturing here
+        # guarantees that stickers, video notes and every other message type are
+        # stored before a test-input filter can consume the update.
+        return await self.memory_capture(handler, event, data)
