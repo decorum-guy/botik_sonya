@@ -37,6 +37,8 @@ _MODE_ALIASES = {
     "пакетный": MEMORY_MODE_BATCH,
 }
 
+_PROTECTED_COMMANDS = {"/memory_mode", "/memory_list"}
+
 
 def memory_mode_setting_key(memory_id: str) -> str:
     return f"{MEMORY_MODE_SETTING_PREFIX}{memory_id}"
@@ -124,11 +126,11 @@ async def _deliver_memory_batch(
     chat_id: int,
     memory_id: str,
     messages: list[tuple[int, int, int, str, str | None]],
-) -> tuple[int, bool]:
-    """Deliver a memory through forwardMessages, falling back without stopping the quest."""
+) -> tuple[int, str | None]:
+    """Deliver through forwardMessages and keep the quest moving on permanent errors."""
 
     delivered_count = 0
-    complete = True
+    notes: list[str] = []
 
     for source_chat_id, message_ids in _source_batches(messages):
         try:
@@ -160,13 +162,16 @@ async def _deliver_memory_batch(
                     source_message_id,
                 )
                 delivered_count += 1
-            complete = False
+            notes.append(
+                "часть переписки пришлось отправить по одному; "
+                "reply-связи в этом фрагменте могли потеряться"
+            )
             continue
 
         sent_count = len(sent)
         delivered_count += sent_count
         if sent_count != len(message_ids):
-            complete = False
+            notes.append("Telegram пропустил часть недоступных элементов")
             logger.error(
                 "Telegram skipped messages in batch memory %s: requested=%s sent=%s "
                 "source_chat_id=%s range=%s..%s",
@@ -178,7 +183,8 @@ async def _deliver_memory_batch(
                 message_ids[-1],
             )
 
-    return delivered_count, complete
+    note = "; ".join(dict.fromkeys(notes)) or None
+    return delivered_count, note
 
 
 async def _play_memory_content(
@@ -199,7 +205,7 @@ async def _play_memory_content(
 
     messages = await self.storage.memory_messages(memory_id)
     mode = mode_override or await get_memory_mode(self.storage, memory_id)
-    complete = True
+    delivery_note: str | None = None
     delivered_count = 0
 
     if not messages:
@@ -208,7 +214,7 @@ async def _play_memory_content(
             f"[Тест] Воспоминание {html.escape(memory_id)} пока пустое.",
         )
     elif mode == MEMORY_MODE_BATCH:
-        delivered_count, complete = await _deliver_memory_batch(
+        delivered_count, delivery_note = await _deliver_memory_batch(
             self,
             chat_id,
             memory_id,
@@ -228,12 +234,7 @@ async def _play_memory_content(
     if action is not None and action.outro:
         await self._send_memory_text(chat_id, action.outro)
 
-    warning = ""
-    if messages and (not complete or delivered_count != len(messages)):
-        warning = (
-            "\n⚠️ Telegram передал не все элементы; подробности сохранены в логе."
-        )
-
+    warning = f"\n⚠️ {html.escape(delivery_note)}." if delivery_note else ""
     await self._send_memory_text(
         chat_id,
         "↩️ <b>Воспоминание завершено</b>\n"
@@ -246,13 +247,13 @@ async def _play_memory_content(
     )
 
     logger.info(
-        "Memory %s delivered to chat %s in %s mode: stored=%s delivered=%s complete=%s",
+        "Memory %s delivered to chat %s in %s mode: stored=%s delivered=%s note=%s",
         memory_id,
         chat_id,
         mode,
         len(messages),
         delivered_count,
-        complete,
+        delivery_note,
     )
     return len(messages)
 
@@ -312,8 +313,8 @@ def _command_name(message: Message) -> str:
     return command.split("@", 1)[0].lower()
 
 
-def _protect_memory_mode_from_builder_filters() -> None:
-    """Keep /memory_mode from becoming Studio test input or memory content."""
+def _protect_memory_commands_from_builder_filters() -> None:
+    """Keep memory admin commands from becoming Studio test input or content."""
 
     for module in tuple(sys.modules.values()):
         spec_name = getattr(getattr(module, "__spec__", None), "name", None)
@@ -328,7 +329,7 @@ def _protect_memory_mode_from_builder_filters() -> None:
             original_call = filter_class.__call__
 
             async def guarded_call(self, message, _original_call=original_call):
-                if _command_name(message) == "/memory_mode":
+                if _command_name(message) in _PROTECTED_COMMANDS:
                     return False
                 return await _original_call(self, message)
 
@@ -437,12 +438,41 @@ async def memory_mode_command(message: Message, command: CommandObject) -> None:
     )
 
 
+async def memory_list_command(message: Message) -> None:
+    if not await _require_admin(message):
+        return
+
+    state = _state_module()
+    storage = getattr(state, "storage", None)
+    if storage is None:
+        await message.answer("База ещё не инициализирована.")
+        return
+
+    items = await storage.list_memories()
+    if not items:
+        await message.answer("Пока пусто.")
+        return
+
+    lines = []
+    for memory_id, count in items:
+        mode = await get_memory_mode(storage, memory_id)
+        lines.append(
+            f"• <code>{html.escape(memory_id)}</code> — {count} сообщений · "
+            f"{memory_mode_label(mode)}"
+        )
+    await message.answer("<b>Сохранённые воспоминания</b>\n\n" + "\n".join(lines))
+
+
 def install_memory_mode_commands(router: Router) -> None:
     if getattr(router, "_memory_mode_commands_installed", False):
         return
 
-    _protect_memory_mode_from_builder_filters()
-    router.message.register(memory_mode_command, Command("memory_mode"))
-    registered = router.message.handlers.pop()
-    router.message.handlers.insert(0, registered)
+    _protect_memory_commands_from_builder_filters()
+    for handler, command in (
+        (memory_mode_command, "memory_mode"),
+        (memory_list_command, "memory_list"),
+    ):
+        router.message.register(handler, Command(command))
+        registered = router.message.handlers.pop()
+        router.message.handlers.insert(0, registered)
     router._memory_mode_commands_installed = True
