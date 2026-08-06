@@ -140,6 +140,8 @@ def test_quest_waits_for_read_button_and_survives_engine_restart() -> None:
 
         header = bot.sent_messages[0]
         finish = bot.sent_messages[-1]
+        assert "Воспоминание восстановлено" in finish["text"]
+        assert "Воспоминание завершено" not in finish["text"]
         reply_parameters = finish["kwargs"]["reply_parameters"]
         assert reply_parameters.message_id == header["message"].message_id
 

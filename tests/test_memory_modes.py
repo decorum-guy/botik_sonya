@@ -132,7 +132,8 @@ def test_legacy_memory_defaults_to_stream_and_finishes_with_reply(monkeypatch) -
     header = bot.sent_messages[0]
     finish = bot.sent_messages[-1]
     assert "5 июля 2024" in header["text"]
-    assert "Воспоминание завершено" in finish["text"]
+    assert "Воспоминание восстановлено" in finish["text"]
+    assert "Воспоминание завершено" not in finish["text"]
     assert finish["kwargs"]["reply_parameters"].message_id == header["message_id"]
 
 
