@@ -13,6 +13,7 @@ from app.media_retry import TELEGRAM_REQUEST_TIMEOUT_SECONDS
 from app.memory_batch_preview import install_memory_batch_preview
 from app.memory_capture_middleware import install_memory_capture
 from app.memory_debug_commands import install_memory_debug
+from app.memory_modes import install_memory_mode_commands
 from app.storage import Storage
 
 
@@ -32,6 +33,7 @@ def _install_runtime_handlers(
     install_admin_ping(bot_app.router)
     install_memory_debug(bot_app.router)
     install_memory_batch_preview(bot_app.router)
+    install_memory_mode_commands(bot_app.router)
 
     capture_storage = storage or getattr(bot_app, "storage", None)
     if capture_storage is not None:
