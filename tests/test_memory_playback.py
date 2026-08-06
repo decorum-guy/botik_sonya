@@ -22,12 +22,12 @@ class FakeStorage:
 class FakeBot:
     def __init__(self, *, fail_forward: bool = False) -> None:
         self.fail_forward = fail_forward
-        self.sent_texts: list[tuple[int, str]] = []
+        self.sent_texts: list[tuple[int, str, dict]] = []
         self.forwarded: list[tuple[int, int, int]] = []
         self.copied: list[tuple[int, int, int]] = []
 
-    async def send_message(self, chat_id: int, text: str):
-        self.sent_texts.append((chat_id, text))
+    async def send_message(self, chat_id: int, text: str, **kwargs):
+        self.sent_texts.append((chat_id, text, kwargs))
         return SimpleNamespace(message_id=len(self.sent_texts))
 
     async def forward_message(self, *, chat_id: int, from_chat_id: int, message_id: int):
@@ -83,6 +83,8 @@ def test_memory_uses_random_delays_only_between_messages(monkeypatch) -> None:
         (777, 100, 12),
     ]
     assert sleeps == [1.0, 3.5]
+    assert "Воспоминание завершено" in bot.sent_texts[-1][1]
+    assert bot.sent_texts[-1][2]["reply_parameters"].message_id == 1
 
 
 def test_memory_falls_back_to_copy_message() -> None:
@@ -95,6 +97,7 @@ def test_memory_falls_back_to_copy_message() -> None:
 
     assert bot.forwarded == []
     assert bot.copied == [(777, 100, 10)]
+    assert "Воспоминание завершено" in bot.sent_texts[-1][1]
 
 
 def test_random_delay_stays_in_required_range() -> None:

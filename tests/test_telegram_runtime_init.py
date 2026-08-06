@@ -27,6 +27,11 @@ def test_runtime_handlers_do_not_require_app_storage(monkeypatch) -> None:
     )
     monkeypatch.setattr(
         telegram,
+        "install_memory_mode_commands",
+        lambda installed_router: calls.append(("mode", installed_router)),
+    )
+    monkeypatch.setattr(
+        telegram,
         "install_memory_capture",
         lambda installed_router, storage: calls.append(("capture", storage)),
     )
@@ -37,6 +42,7 @@ def test_runtime_handlers_do_not_require_app_storage(monkeypatch) -> None:
         ("ping", router),
         ("debug", router),
         ("batch", router),
+        ("mode", router),
     ]
 
 
@@ -63,6 +69,11 @@ def test_runtime_handlers_use_explicit_storage(monkeypatch) -> None:
     )
     monkeypatch.setattr(
         telegram,
+        "install_memory_mode_commands",
+        lambda installed_router: calls.append(("mode", installed_router)),
+    )
+    monkeypatch.setattr(
+        telegram,
         "install_memory_capture",
         lambda installed_router, installed_storage: calls.append(
             ("capture", installed_storage)
@@ -75,5 +86,6 @@ def test_runtime_handlers_use_explicit_storage(monkeypatch) -> None:
         ("ping", router),
         ("debug", router),
         ("batch", router),
+        ("mode", router),
         ("capture", storage),
     ]
