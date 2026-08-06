@@ -154,7 +154,7 @@ async def send_memory_batch_preview(
     await _send_text(
         bot,
         destination_chat_id,
-        "↩️ <b>Воспоминание завершено</b>\n"
+        "↩️ <b>Воспоминание восстановлено</b>\n"
         f"{status}\n"
         "Нажми на это сообщение-ответ, чтобы сразу вернуться к началу воспоминания.",
         reply_parameters=ReplyParameters(
