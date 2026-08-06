@@ -83,7 +83,8 @@ def test_memory_uses_random_delays_only_between_messages(monkeypatch) -> None:
         (777, 100, 12),
     ]
     assert sleeps == [1.0, 3.5]
-    assert "Воспоминание завершено" in bot.sent_texts[-1][1]
+    assert "Воспоминание восстановлено" in bot.sent_texts[-1][1]
+    assert "Воспоминание завершено" not in bot.sent_texts[-1][1]
     assert bot.sent_texts[-1][2]["reply_parameters"].message_id == 1
 
 
@@ -97,7 +98,8 @@ def test_memory_falls_back_to_copy_message() -> None:
 
     assert bot.forwarded == []
     assert bot.copied == [(777, 100, 10)]
-    assert "Воспоминание завершено" in bot.sent_texts[-1][1]
+    assert "Воспоминание восстановлено" in bot.sent_texts[-1][1]
+    assert "Воспоминание завершено" not in bot.sent_texts[-1][1]
 
 
 def test_random_delay_stays_in_required_range() -> None:
