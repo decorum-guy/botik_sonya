@@ -97,7 +97,8 @@ def test_batch_preview_forwards_all_messages_in_one_request_and_replies_to_heade
     header = bot.sent_messages[0]
     finish = bot.sent_messages[-1]
     assert "5 июля 2024" in header["text"]
-    assert "Воспоминание завершено" in finish["text"]
+    assert "Воспоминание восстановлено" in finish["text"]
+    assert "Воспоминание завершено" not in finish["text"]
     reply_parameters = finish["kwargs"]["reply_parameters"]
     assert reply_parameters.message_id == header["message_id"]
     assert reply_parameters.allow_sending_without_reply is True
