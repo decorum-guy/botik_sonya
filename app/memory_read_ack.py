@@ -29,6 +29,8 @@ logger = logging.getLogger(__name__)
 
 MEMORY_ACK_CALLBACK_PREFIX = "memory_ack:"
 MEMORY_ACK_WAITING_KIND = "memory_ack"
+MEMORY_FINISH_OLD_TITLE = "Воспоминание завершено"
+MEMORY_FINISH_TITLE = "Воспоминание восстановлено"
 
 
 def _ack_keyboard(token: str) -> InlineKeyboardMarkup:
@@ -112,7 +114,7 @@ async def _play_memory_and_wait(
     warning = f"\n⚠️ {html.escape(delivery_note)}." if delivery_note else ""
     await self._send_memory_text(
         chat_id,
-        "↩️ <b>Воспоминание завершено</b>\n"
+        f"↩️ <b>{MEMORY_FINISH_TITLE}</b>\n"
         "Когда дочитаешь, нажми «Прочитала» — после этого история продолжится."
         f"{warning}",
         reply_parameters=ReplyParameters(
@@ -283,9 +285,24 @@ def install_memory_read_ack(engine_module: Any) -> None:
     if getattr(engine_class, "_memory_read_ack_installed", False):
         return
 
+    # memory_modes owns preview/playback outside the quest execution loop. Wrap
+    # its shared text sender too, so every memory final message uses the same
+    # wording without duplicating the whole playback implementation.
+    original_send_memory_text = engine_class._send_memory_text
+
+    async def send_memory_text_with_restored_wording(
+        self,
+        chat_id: int,
+        text: str,
+        **kwargs: Any,
+    ):
+        text = text.replace(MEMORY_FINISH_OLD_TITLE, MEMORY_FINISH_TITLE)
+        return await original_send_memory_text(self, chat_id, text, **kwargs)
+
     # Keep parse-mode selection on the class so the copied execution loop remains
     # independent from module globals and easy to test.
     engine_class._parse_mode = staticmethod(engine_module.parse_mode)
+    engine_class._send_memory_text = send_memory_text_with_restored_wording
     engine_class._memory_ack_original_handle_button = engine_class.handle_button
     engine_class._execute = _execute_with_memory_ack
     engine_class.handle_button = _handle_button_with_memory_ack
