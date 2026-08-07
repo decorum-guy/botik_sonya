@@ -154,6 +154,7 @@ async def help_admin(message: Message) -> None:
         "/start_quest — интро через задержку из .env\n"
         "/start_quest_now — запустить интро сразу\n"
         "/cancel_quest — отменить запуск\n"
+        "/continue — продолжить после аварийной остановки\n"
         "/status — привязка, таймер и заполнение ROADMAP\n\n"
         "/memory_setup — заполнить все переменные из ROADMAP\n"
         "/memory_done — закончить текущую и перейти к следующей\n"
@@ -250,7 +251,13 @@ async def start_quest_now(message: Message) -> None:
         return
     step_id = engine.roadmap.meta.intro_step_id or engine.roadmap.meta.entry_step_id
     await engine.start(participant, step_id)
-    await message.answer("Тестовый запуск выполнен.")
+    failure = await engine.quest_failure(participant)
+    if failure:
+        await message.answer(
+            "🚨 Запуск остановился на ошибке. Точка сохранена; после проверки используй /continue."
+        )
+    else:
+        await message.answer("Тестовый запуск выполнен.")
 
 
 @router.message(Command("cancel_quest"))
@@ -259,6 +266,27 @@ async def cancel_quest(message: Message) -> None:
         return
     await storage.cancel_quest()
     await message.answer("Запланированный запуск отменён.")
+
+
+@router.message(Command("continue"))
+async def continue_quest(message: Message) -> None:
+    if not await require_admin(message):
+        return
+    participant = await storage.participant_chat_id()
+    if participant is None:
+        await message.answer("Участник ещё не привязан к боту.")
+        return
+
+    result = await engine.continue_quest(participant)
+    markers = {
+        "completed": "✅",
+        "resumed": "▶️",
+        "waiting": "ℹ️",
+        "busy": "ℹ️",
+        "missing": "ℹ️",
+        "failed": "🚨",
+    }
+    await message.answer(f"{markers[result.status]} {result.message}")
 
 
 @router.message(Command("status"))
@@ -272,12 +300,25 @@ async def status(message: Message) -> None:
     if schedule:
         schedule_text = f"{schedule[0].isoformat()} · {schedule[1]}"
     missing = await missing_memory_variables(storage, memory_variables)
+
+    recovery_text = "нет активного квеста"
+    if participant is not None:
+        progress = await storage.get_progress(participant)
+        failure = await engine.quest_failure(participant)
+        if failure:
+            recovery_text = "аварийная пауза — используй /continue"
+        elif progress and progress.waiting:
+            recovery_text = f"ожидание: {progress.waiting.get('kind', 'unknown')}"
+        elif progress:
+            recovery_text = "есть сохранённая точка выполнения"
+
     await message.answer(
         f"Участник: <code>{participant or 'не привязан'}</code>\n"
         f"Таймер: <code>{schedule_text}</code>\n"
         f"Прокси: <code>{proxy_state}</code>\n"
         f"ROADMAP: <code>{settings.roadmap_path}</code>\n"
-        f"Воспоминания: <code>{len(memory_variables) - len(missing)}/{len(memory_variables)}</code>"
+        f"Воспоминания: <code>{len(memory_variables) - len(missing)}/{len(memory_variables)}</code>\n"
+        f"Восстановление: <code>{recovery_text}</code>"
     )
 
 
@@ -435,6 +476,7 @@ async def main() -> None:
 
     bot = build_bot(settings)
     engine = QuestEngine(bot, storage, roadmap, root)
+    engine.configure_quest_recovery(admin_access.admin_user_id)
     dispatcher = Dispatcher()
     dispatcher.include_router(router)
     scheduler = asyncio.create_task(scheduler_loop())
