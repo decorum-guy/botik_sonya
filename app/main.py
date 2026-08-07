@@ -16,6 +16,7 @@ from app.admin_access import AdminAccess
 from app.config import Settings, load_settings
 from app.engine import QuestEngine
 from app.memory_capture import capture_memory_message
+from app.memory_modes import install_memory_mode_commands
 from app.memory_variables import (
     MemoryVariable,
     collect_memory_variables,
@@ -77,7 +78,7 @@ async def prompt_memory_setup(message: Message) -> None:
     if not missing:
         await message.answer(
             f"✅ Все переменные воспоминаний заполнены: <b>{total}/{total}</b>.\n"
-            "Для проверки используй /memory_preview <id>."
+            "Для проверки используй <code>/memory_preview ID</code>."
         )
         return
 
@@ -163,6 +164,7 @@ async def help_admin(message: Message) -> None:
         "/memory_save — закончить ручную запись\n"
         "/memory_cancel — выйти из записи\n"
         "/memory_list — список сохранённых воспоминаний\n"
+        "/memory_mode — режимы отправки воспоминаний\n"
         "/memory_preview &lt;id&gt; — переслать воспоминание тебе\n"
         "/memory_play &lt;id&gt; — переслать воспоминание участнице"
     )
@@ -477,6 +479,7 @@ async def main() -> None:
     bot = build_bot(settings)
     engine = QuestEngine(bot, storage, roadmap, root)
     engine.configure_quest_recovery(admin_access.admin_user_id)
+    install_memory_mode_commands(router)
     dispatcher = Dispatcher()
     dispatcher.include_router(router)
     scheduler = asyncio.create_task(scheduler_loop())
