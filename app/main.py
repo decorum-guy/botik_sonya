@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import sys
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -26,6 +27,9 @@ from app.roadmap import load_roadmap
 from app.storage import Storage
 from app.telegram import build_bot
 
+if __name__ == "__main__":
+    sys.modules.setdefault("app.main", sys.modules[__name__])
+
 router = Router()
 settings: Settings
 storage: Storage
@@ -41,7 +45,9 @@ async def is_admin(message: Message) -> bool:
 async def require_admin(message: Message) -> bool:
     if await is_admin(message):
         return True
-    await message.answer("Команда недоступна. Сначала авторизуйся через /admin <пароль>.")
+    await message.answer(
+        "Команда недоступна. Сначала авторизуйся через <code>/admin пароль</code>."
+    )
     return False
 
 
